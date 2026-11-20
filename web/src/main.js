@@ -45,7 +45,7 @@ function notBuilt(name, cities) {
 }
 
 async function boot() {
-  const cities = await fetch('data/cities.json').then((r) => r.json()).catch(() => ({ gurgaon: { name: 'Gurugram' } }));
+  const cities = await fetch('data/cities.json', { cache: 'no-cache' }).then((r) => r.json()).catch(() => ({ gurgaon: { name: 'Gurugram' } }));
   const asked = (params.get('city') || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const byName = Object.keys(cities).find((id) => cities[id].name.toLowerCase().replace(/[^a-z0-9]+/g, '-') === asked);
   if (asked && !cities[asked] && !byName) { notBuilt(params.get('city'), cities); return; }
