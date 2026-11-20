@@ -163,8 +163,8 @@ GENERIC_SITE = re.compile(r"^(block|tower|wing|building|phase|house|flat|apartme
 def osm_projects(out):
     """Named housing complexes from OpenStreetMap, shaped like portal projects so the rest of the build is shared.
 
-    Sites are named residential areas and complexes (1,500 m2 to 60 ha, so whole neighbourhoods are left out) and named
-    apartment buildings that are not already inside one of those sites. Nothing here is estimated: no prices, no unit
+    Sites are named residential areas and complexes (1,500 m2 to 15 ha, or up to 40 ha when apartment buildings are mapped
+    inside, so villages and whole neighbourhoods are left out) and named apartment buildings not already inside a site. Nothing here is estimated: no prices, no unit
     sizes, only what OpenStreetMap says.
     """
     load = lambda f, empty: json.loads((out / f).read_text()) if (out / f).exists() else empty
@@ -179,7 +179,7 @@ def osm_projects(out):
     kept, seen = [], set()
     for x in sorted(sites, key=lambda x: -geo.area_m2(x["ring"])):
         size = geo.area_m2(x["ring"])
-        if x["osm"] in seen or not 1500 <= size <= 600_000 or GENERIC_SITE.match(x["name"].strip()):
+        if x["osm"] in seen or not 1500 <= size <= 400_000 or GENERIC_SITE.match(x["name"].strip()):
             continue
         seen.add(x["osm"])
         x["_c"], x["_size"] = geo.centroid(x["ring"]), size
@@ -196,6 +196,7 @@ def osm_projects(out):
         seen.add(b["osm"])
         b["_c"], b["_size"], b["apt"] = c, geo.area_m2(b["ring"]), b["building"] == "apartments"
         kept.append(b)
+    kept = [x for x in kept if x["_size"] <= 150_000 or x["apt"]]
     projects = []
     for x in kept:
         lng, lat = x["_c"]
