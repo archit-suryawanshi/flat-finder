@@ -10,6 +10,7 @@ import json
 import pathlib
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 import mb_parse
@@ -34,7 +35,9 @@ def fetch(url):
         return gzip.decompress(f.read_bytes()).decode("utf-8", "ignore")
     for attempt in range(3):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            # some portal URLs carry spaces or non-breaking spaces in the slug
+            safe = urllib.parse.quote(url.replace("\xa0", " ").strip(), safe=":/?=&%#+,;@-._~")
+            req = urllib.request.Request(safe, headers={"User-Agent": UA})
             html = net.urlopen(req, timeout=40).read().decode("utf-8", "ignore")
             f.write_bytes(gzip.compress(html.encode("utf-8"), 9))
             time.sleep(DELAY)
