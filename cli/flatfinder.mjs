@@ -4,13 +4,13 @@ import { readFile, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CRITERIA, feetLabel, formatINR, matchSociety, priceFor } from '../web/src/filters.js';
 
-const SITE = 'https://flat-finder.pages.dev';
+const SITE = process.env.FLATFINDER_SITE || 'https://archit-suryawanshi.github.io/flat-finder';
 
 const HELP = `flatfinder: find housing societies that fit
 
   npx github:kairothq/flat-finder [options]
 
-  --city <id>            gurgaon (default), more as they are added
+  --city <id>            gurgaon (default) or any city added with pipeline/add_city.py
   --bhk 3,4              BHK types
   --min-bedroom 11'3x12'3   every bedroom must clear both sides (also 11.25x12.25)
   --min-sqft 1620        minimum unit size (super area where known)

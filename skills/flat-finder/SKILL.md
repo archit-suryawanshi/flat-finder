@@ -5,9 +5,9 @@ description: Use to find flats by room size and amenities, to add a new city to 
 
 # Flat Finder
 
-Flat Finder (https://flat-finder.pages.dev, repo `kairothq/flat-finder`) puts every housing society in a city on one map. Portal data covers every society; **verified rows** (bedroom sides read from builder brochures or RERA plans) are what make the room filter trustworthy. This skill does three jobs. Pick the one the user asked for.
+Flat Finder (https://archit-suryawanshi.github.io/flat-finder, repo `archit-suryawanshi/flat-finder`) puts every housing society in a city on one map. Portal data covers every society; **verified rows** (bedroom sides read from builder brochures or RERA plans) are what make the room filter trustworthy. This skill does three jobs. Pick the one the user asked for.
 
-Work from a clone of the repo: `gh repo clone kairothq/flat-finder && cd flat-finder`.
+Work from a clone of the repo: `gh repo clone archit-suryawanshi/flat-finder && cd flat-finder`.
 
 ## Rules (all jobs)
 
@@ -21,22 +21,19 @@ Work from a clone of the repo: `gh repo clone kairothq/flat-finder && cd flat-fi
 ## Job 1: search
 
 ```bash
-npx github:kairothq/flat-finder --city gurgaon --bhk 3,4 --min-bedroom "11'3x12'3" --min-sqft 1620 --amenity squash --likely
+npx github:archit-suryawanshi/flat-finder --city gurgaon --bhk 3,4 --min-bedroom "11'3x12'3" --min-sqft 1620 --amenity squash --likely
 ```
 
 Explain the verdicts: **match** (every bedroom read and passes), **likely** (rooms read so far pass, not all read), societies with no room data are "not checked yet" and are never shown as matches. Offer Job 3 for the most promising "not checked yet" societies.
 
 ## Job 2: add a city
 
-1. Add the city to `data/cities.json`: `name`, Magicbricks city slug (`magicbricks`, as in `magicbricks.com/residential-projects-in-<slug>-nprid`), `bbox` as [south, west, north, east], `center` [lng, lat], `zoom`.
-2. Run the pipeline (python 3.9+, no dependencies):
+1. Run one command with the city's name (python 3.9+, no dependencies). It geocodes the city, uses Magicbricks if it lists the city (about 15 Indian cities) or OpenStreetMap housing complexes otherwise, writes `data/cities.json`, crawls, fetches OSM and builds:
    ```bash
-   cd pipeline
-   python3 mb_crawl.py list <city>       # list pages, a few minutes
-   python3 mb_crawl.py projects <city>   # every project page, ~1 hour for 3,000 projects
-   python3 osm_fetch.py <city>           # OSM outlines; retries Overpass mirrors
-   python3 build_city.py <city>          # writes web/public/data/<city>.json, -shapes.geojson, cities.json
+   python3 pipeline/add_city.py "<city name>"            # --max N caps the Magicbricks crawl (default 3000), --all for every project, --osm-only skips Magicbricks
    ```
+   Or on GitHub: Actions → "Add a city" → Run workflow, which also commits the data and redeploys the site.
+2. The steps it runs can also be run one at a time: `mb_crawl.py list <id>`, `mb_crawl.py projects <id>`, `osm_fetch.py <id>` (plus `osm_fetch.py <id> complexes` for OSM-only cities), `build_city.py <id>`.
 3. Check the printed counts: `not_located` should be small, and `other` kinds should be under 1%. Open `cd web && npm run dev` then `http://localhost:5173/?city=<city>` and confirm societies sit on the right neighbourhoods.
 4. Run tests: `cd pipeline && uv run --with pytest pytest` and `cd web && npx vitest run --root .. cli web/src`.
 5. Open a pull request with the new data files. Do not commit `pipeline/cache/` or `osm_buildings.geojson`.

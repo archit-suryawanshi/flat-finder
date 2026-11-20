@@ -2,7 +2,32 @@
 
 Every housing society in a city on one night map. Set the smallest bedroom you can live with, size, BHK, amenities and budget, and watch the societies that fit light up. Every number links to where it came from.
 
-Gurugram is first: about 2,700 projects from Magicbricks, building outlines from OpenStreetMap, and a set of societies verified by reading builder brochures and HRERA plans.
+Works for any city: type its name and the map builds itself. Gurugram is the most complete (about 2,700 projects from Magicbricks, building outlines from OpenStreetMap, and societies verified from builder brochures and HRERA plans).
+
+Site: https://archit-suryawanshi.github.io/flat-finder/ · forked from [kairothq/flat-finder](https://github.com/kairothq/flat-finder).
+
+## Add any city
+
+**On GitHub (no setup):** open [Actions → Add a city](https://github.com/archit-suryawanshi/flat-finder/actions/workflows/add-city.yml), press **Run workflow**, type the city name and run it. It finds the city, fetches its housing societies, commits the data and redeploys the site. Then pick the city from the menu at the top left, or open `?city=<name>`. The site's city menu also has "+ Add a city", and opening `?city=<any name>` for a city not built yet explains the same step.
+
+**On your computer:**
+
+```bash
+python3 pipeline/add_city.py "Pune"                  # Magicbricks if it covers the city, else OpenStreetMap
+python3 pipeline/add_city.py "Hyderabad" --max 1500   # cap the Magicbricks crawl (default 3,000 projects)
+python3 pipeline/add_city.py "Mumbai" --all           # every project (big cities have ~30,000: hours)
+python3 pipeline/add_city.py "Lisbon, Portugal"       # outside India
+cd web && npm install && npm run dev                  # then http://localhost:5173/?city=pune
+```
+
+What a city gets depends on what covers it:
+
+| Source | Cities | What you get |
+|---|---|---|
+| Magicbricks + OpenStreetMap | Gurugram, Pune, Mumbai, Bengaluru, Hyderabad, Chennai, Kolkata, Noida, Greater Noida, Ghaziabad, Navi Mumbai, Thane, Ahmedabad (checked automatically, so new ones work too) | every listed project, buy and rent prices, unit sizes, ratings and reviews, amenities, "probably fits" bedroom estimates |
+| OpenStreetMap only | everywhere else, in India or abroad | named housing complexes and apartment buildings with outlines, locality, what is nearby, score. No prices or room sizes, because nothing is estimated without a source |
+
+The city is found with OpenStreetMap's geocoder; its box is capped at about 50 km across. Everything is cached, so a run that hits a network error can just be started again. Cities without their own verified rows borrow Gurugram's bedroom-to-unit-size model for "probably fits", and the site says so.
 
 ## What the colours mean
 
@@ -41,13 +66,13 @@ Cards also show resident ratings by category, review snippets, the 5-year price 
 
 ## Use it inside Claude (connector)
 
-Flat Finder is an MCP server at `https://flat-finder.pages.dev/mcp`. In Claude, add a custom connector with that URL, then ask things like "3 BHK in Gurgaon under ₹80k rent, every bedroom at least 11 by 12, park within 500 m". Tools: `search_societies` (any sector, budget, size, amenity, distance; up to 200 results per call), `breakdown` (group by sector, BHK, amenity, metro distance or rent band), `list_localities`, `get_society` (with reviews and rating categories), `compare_societies`. Listing prices that look like typos are flagged with a reason and not used for filtering.
+The original deployment runs an MCP server at `https://flat-finder.pages.dev/mcp` (Gurugram only; it needs Cloudflare Pages Functions, so it is not part of the GitHub Pages site). In Claude, add a custom connector with that URL, then ask things like "3 BHK in Gurgaon under ₹80k rent, every bedroom at least 11 by 12, park within 500 m". Tools: `search_societies` (any sector, budget, size, amenity, distance; up to 200 results per call), `breakdown` (group by sector, BHK, amenity, metro distance or rent band), `list_localities`, `get_society` (with reviews and rating categories), `compare_societies`. Listing prices that look like typos are flagged with a reason and not used for filtering.
 
 ## Search from a terminal
 
 ```bash
-npx github:kairothq/flat-finder --bhk 3,4 --min-bedroom "11'3x12'3" --min-sqft 1620 --amenity squash --likely
-npx github:kairothq/flat-finder --bhk 3 --max-rent 80k --amenity pool
+npx github:archit-suryawanshi/flat-finder --bhk 3,4 --min-bedroom "11'3x12'3" --min-sqft 1620 --amenity squash --likely
+npx github:archit-suryawanshi/flat-finder --city pune --bhk 3 --max-rent 80k --amenity pool
 ```
 
 ## Use it with Claude Code
@@ -69,7 +94,7 @@ cd ../web && npm install && npm run dev
 
 Tests: `cd pipeline && uv run --with pytest pytest` and `cd web && npx vitest run --root .. cli web/src`.
 
-Cities live in `data/cities.json`. Gurugram is built; Bengaluru and Mumbai are configured and need the pipeline run (see the skill, Job 2).
+Cities live in `data/cities.json`; `add_city.py` writes them there.
 
 Press `/` to search for a society. The Streets button switches to a street map with road and sector names.
 

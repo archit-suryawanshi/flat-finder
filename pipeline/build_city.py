@@ -1,6 +1,8 @@
-"""Merge Magicbricks projects, OSM shapes and verified research into the web data files.
+"""Merge Magicbricks projects (or, where no portal covers the city, OpenStreetMap housing complexes), OSM shapes and
+verified research into the web data files.
 
 usage: python build_city.py <city>  -> web/public/data/<city>.json, <city>-shapes.geojson, cities.json
+Add a new city with add_city.py, which fetches the inputs and then runs this.
 """
 import json
 import math
@@ -155,15 +157,71 @@ def match_verified(v, projects, taken=()):
     return best
 
 
-def events_for(s):
+GENERIC_SITE = re.compile(r"^(block|tower|wing|building|phase|house|flat|apartment|apartments|bldg|plot|annex|annexe|no\.?|[a-z0-9]{1,2})\b[\s\-.]*[a-z0-9]{0,3}$", re.I)
+
+
+def osm_projects(out):
+    """Named housing complexes from OpenStreetMap, shaped like portal projects so the rest of the build is shared.
+
+    Sites are named residential areas and complexes (1,500 m2 to 60 ha, so whole neighbourhoods are left out) and named
+    apartment buildings that are not already inside one of those sites. Nothing here is estimated: no prices, no unit
+    sizes, only what OpenStreetMap says.
+    """
+    load = lambda f, empty: json.loads((out / f).read_text()) if (out / f).exists() else empty
+    areas = load("osm_areas.geojson", {"features": []})["features"]
+    cx = load("osm_complexes.json", [])
+    places = [c for c in cx if c["k"] == "place"]
+    place_grid = Grid(places, lambda q: (q["lng"], q["lat"]))
+    sites = [{"osm": a["properties"]["osm"], "name": a["properties"]["name"], "ring": a["geometry"]["coordinates"][0], "apt": False}
+             for a in areas]
+    sites += [{**c, "apt": True} for c in cx if c["k"] == "complex" and not c.get("building")]
+    blds = [c for c in cx if c["k"] == "complex" and c.get("building")]
+    kept, seen = [], set()
+    for x in sorted(sites, key=lambda x: -geo.area_m2(x["ring"])):
+        size = geo.area_m2(x["ring"])
+        if x["osm"] in seen or not 1500 <= size <= 600_000 or GENERIC_SITE.match(x["name"].strip()):
+            continue
+        seen.add(x["osm"])
+        x["_c"], x["_size"] = geo.centroid(x["ring"]), size
+        kept.append(x)
+    site_grid = Grid(kept, lambda x: x["_c"])
+    for b in blds:
+        c = geo.centroid(b["ring"])
+        host = next((x for x in site_grid.near(c, r=1) if geo.point_in_ring(c, x["ring"])), None)
+        if host:
+            host["apt"] = True  # an apartment building inside a site: the site is a housing complex
+            continue
+        if b["osm"] in seen or geo.area_m2(b["ring"]) < 150 or GENERIC_SITE.match(b["name"].strip()):
+            continue
+        seen.add(b["osm"])
+        b["_c"], b["_size"], b["apt"] = c, geo.area_m2(b["ring"]), b["building"] == "apartments"
+        kept.append(b)
+    projects = []
+    for x in kept:
+        lng, lat = x["_c"]
+        locality = x.get("suburb")
+        if not locality:
+            near = [(geo.dist_m(x["_c"], (q["lng"], q["lat"])), q["name"]) for q in place_grid.near(x["_c"], r=2)]
+            locality = min(near)[1] if near and min(near)[0] < 2500 else None
+        t, i = x["osm"].split("/")
+        flats = re.match(r"\d+", str(x.get("flats") or ""))
+        projects.append({"mb_id": f"o{t[0]}{i}", "name": x["name"], "developer": x.get("operator"), "locality": locality,
+                         "lat": lat, "lng": lng, "units": int(flats.group()) if flats else None,
+                         "acres": round(x["_size"] / 4047, 1) if not x.get("building") and x["_size"] >= 4047 else None,
+                         "config_text": "apartment" if x["apt"] else None, "url": f"https://www.openstreetmap.org/{x['osm']}",
+                         "website": x.get("website"), "_osm": {"osm": x["osm"], "ring": x["ring"], "h": x.get("h"), "building": bool(x.get("building"))}})
+    return projects
+
+
+def events_for(s, city_name="the city"):
     ev = []
     sid = s["id"]
     src = s.get("url")
-    ev.append({"sid": sid, "step": "Located on map", "finding": f"{s['locality'] or 'Gurgaon'} · {s['lat']:.4f}, {s['lng']:.4f}", "url": src})
+    ev.append({"sid": sid, "step": "Located on map", "finding": f"{s['locality'] or city_name} · {s['lat']:.4f}, {s['lng']:.4f}", "url": src})
     bits = [f"{int(s['towers'])} towers" if s.get("towers") else None, f"{int(s['units']):,} units" if s.get("units") else None,
             f"{s['acres']} acres" if s.get("acres") else None]
     if any(bits):
-        ev.append({"sid": sid, "step": "Project page read", "finding": " · ".join(b for b in bits if b), "url": src})
+        ev.append({"sid": sid, "step": "Project page read" if "magicbricks" in (src or "") else "OpenStreetMap read", "finding": " · ".join(b for b in bits if b), "url": src})
     if s.get("rera_id"):
         ev.append({"sid": sid, "step": "RERA registration", "finding": s["rera_id"][:60], "url": src})
     if s["amenities"]:
@@ -225,13 +283,24 @@ def shapes_for(s, area, bld_grid, sid_seed):
 def main(city="gurgaon"):
     cfg = json.loads((ROOT.parent / "data" / "cities.json").read_text())[city]
     out = OUT / city
-    raw = json.loads((out / "mb_projects.json").read_text())
-    located = [p for p in raw if p.get("lat") and p.get("lng") and 28.2 < p["lat"] < 28.7 and 76.7 < p["lng"] < 77.3]
+    portal = (out / "mb_projects.json").exists() and cfg.get("source", "magicbricks") == "magicbricks"
+    raw = json.loads((out / "mb_projects.json").read_text()) if portal else osm_projects(out)
+    if not raw:
+        raise SystemExit(f"No housing societies found for {cfg['name']}. OpenStreetMap may have few named residential areas here.")
+    GENERIC.update(tokens(cfg["name"]) | {city})
+    s0, w0, n0, e0 = cfg["bbox"]
+    pad = 0.1  # portal coordinates just outside the box are still the city's suburbs; far-off ones are typos
+    located = [p for p in raw if p.get("lat") and p.get("lng") and s0 - pad < p["lat"] < n0 + pad and w0 - pad < p["lng"] < e0 + pad]
     not_located = len(raw) - len(located)
     projects = dedupe(located)
-    areas = json.loads((out / "osm_areas.geojson").read_text())["features"]
+    areas = json.loads((out / "osm_areas.geojson").read_text())["features"] if portal else []
     area_grid = Grid(areas, lambda a: geo.centroid(a["geometry"]["coordinates"][0]))
-    blds = json.loads((out / "osm_buildings.geojson").read_text())["features"]
+    bfile = out / "osm_buildings.geojson"
+    blds = json.loads(bfile.read_text())["features"] if bfile.exists() else []
+    for p in projects:  # a standalone apartment building from OSM is its own tower
+        o = p.get("_osm")
+        if o and o["building"]:
+            blds.append({"type": "Feature", "properties": {"osm": o["osm"], "h": o["h"]}, "geometry": {"type": "Polygon", "coordinates": [o["ring"]]}})
     for b in blds:
         b["_c"] = geo.centroid(b["geometry"]["coordinates"][0])
     bld_grid = Grid(blds, lambda b: b["_c"])
@@ -246,7 +315,7 @@ def main(city="gurgaon"):
              "price_min": p.get("price_min"), "price_max": p.get("price_max"), "kind": kind_of(p).rstrip("~"),
              "kind_inferred": kind_of(p).endswith("~"),
              "config_text": p.get("config_text"), "amenities": p.get("amenities") or [], "amen_facts": {},
-             "unit_types": portal_units(p), "url": p["url"], "brochure_url": p.get("brochure_url"),
+             "unit_types": portal_units(p), "url": p["url"], "brochure_url": p.get("brochure_url"), "website": p.get("website"),
              "plan_links": {b: v["plan_images"] for b, v in ((p.get("configs") or {}).get("by_bhk") or {}).items() if v["plan_images"]},
              "verified": False, "note": None, "images": p.get("images") or [],
              "rating": p.get("rating"), "rating_count": p.get("rating_count"), "review_count": p.get("review_count"),
@@ -361,7 +430,12 @@ def main(city="gurgaon"):
                 s["ai_read"] = True
 
     # smallest-bedroom lower bounds from unit size, for units whose plans are unread
-    room_model = rooms_model.fit(ver)
+    # cities without their own verified rows borrow Gurugram's: Indian bedroom-to-unit-size ratios are similar, and
+    # the result is only ever shown as "probably fits"
+    gg = verified.ROOT / "data" / "verified" / "gurgaon.json"
+    room_model = rooms_model.fit(ver if ver or not gg.exists() else verified.load_verified(gg))
+    if room_model and not ver:
+        room_model["borrowed_from"] = "Gurugram"
     for s in societies:
         for u in s["unit_types"]:
             if not u.get("bedrooms"):
@@ -422,8 +496,10 @@ def main(city="gurgaon"):
             pricing.add_estimates(s, model, {b: statistics.median(v) for b, v in sizes.items()}, psf)
         s["prices"] = {str(b): v for b, v in sorted(s["prices"].items())}
 
+    osm_sites = {p["_s"]["id"]: p["_osm"] for p in projects if p.get("_osm")}
     for i, s in enumerate(societies):
-        area = match_area(s, area_grid)
+        o = osm_sites.get(s["id"])
+        area = {"properties": {"osm": o["osm"]}, "geometry": {"type": "Polygon", "coordinates": [o["ring"]]}} if o else match_area(s, area_grid)
         if area and area["properties"]["osm"] in used_areas:
             area = None  # another society already owns this boundary
         if area:
@@ -432,17 +508,21 @@ def main(city="gurgaon"):
         f, shape = shapes_for(s, area, bld_grid, i)
         s["shape"] = shape
         shapes.extend(f)
-        events.extend(events_for(s))
+        events.extend(events_for(s, cfg["name"]))
 
     WEB.mkdir(parents=True, exist_ok=True)
-    doc = {"city": {"id": city, "name": cfg["name"], "center": cfg["center"], "zoom": cfg["zoom"]},
+    sources = ["Magicbricks project pages", "OpenStreetMap contributors"] if portal else ["OpenStreetMap contributors"]
+    if ver:
+        sources.append("Builder brochures and RERA plans (verified rows)")
+    doc = {"city": {"id": city, "name": cfg["name"], "center": cfg["center"], "zoom": cfg["zoom"], "source": "magicbricks" if portal else "osm",
+                    "country": cfg.get("country", "in"), "bbox": cfg["bbox"]},
             "price_model": model,
             "room_model": room_model,
             "counts": {"listed": len(raw), "on_map": len(societies), "not_located": not_located,
                        "ai_read": sum(1 for s in societies if s.get("ai_read")),
                        "for_sale": sum(s["sale_count"] or 0 for s in societies), "for_rent": sum(s["rent_count"] or 0 for s in societies),
                        "verified": sum(s["verified"] for s in societies)},
-            "sources": ["Magicbricks project pages", "OpenStreetMap contributors", "HRERA Gurugram", "Builder brochures (verified rows)"],
+            "sources": sources,
             "societies": societies, "events": events}
     details = {}
     for s in societies:  # heavy per-society text, loaded only when a card opens

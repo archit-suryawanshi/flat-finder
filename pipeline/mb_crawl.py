@@ -1,7 +1,7 @@
 """Polite, cached, resumable Magicbricks crawler.
 
-usage: python mb_crawl.py list <city>      # all list pages -> out/<city>/mb_index.json
-       python mb_crawl.py projects <city>  # every project page -> out/<city>/mb_projects.json
+usage: python mb_crawl.py list <city> [--max N]  # list pages -> out/<city>/mb_index.json (first N projects, default all)
+       python mb_crawl.py projects <city>         # every project page -> out/<city>/mb_projects.json
 <city> is a key in data/cities.json (default gurgaon).
 """
 import gzip
@@ -13,6 +13,7 @@ import time
 import urllib.request
 
 import mb_parse
+import net
 
 ROOT = pathlib.Path(__file__).parent
 CACHE = ROOT / "cache" / "mb"
@@ -34,7 +35,7 @@ def fetch(url):
     for attempt in range(3):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA})
-            html = urllib.request.urlopen(req, timeout=40).read().decode("utf-8", "ignore")
+            html = net.urlopen(req, timeout=40).read().decode("utf-8", "ignore")
             f.write_bytes(gzip.compress(html.encode("utf-8"), 9))
             time.sleep(DELAY)
             return html
@@ -44,10 +45,16 @@ def fetch(url):
     return None
 
 
+def max_projects():
+    if "--max" in sys.argv:
+        return int(sys.argv[sys.argv.index("--max") + 1])
+    return None
+
+
 def crawl_list():
     first = fetch(LIST_URL.format(1))
     total = mb_parse.parse_total(first)
-    pages = -(-total // 20)
+    pages = -(-min(total, max_projects() or total) // 20)
     projects = {}
     for n in range(1, pages + 1):
         html = fetch(LIST_URL.format(n))
@@ -58,7 +65,7 @@ def crawl_list():
         print(f"list {n}/{pages}: {len(projects)} projects", flush=True)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "mb_index.json").write_text(json.dumps(list(projects.values()), indent=0))
-    print("total reported", total, "collected", len(projects))
+    print("total reported", total, "collected", len(projects), flush=True)
 
 
 def crawl_projects():

@@ -1,0 +1,63 @@
+name: Add a city
+
+# Type a city name, press Run. The workflow finds the city, fetches its housing societies (Magicbricks where it
+# covers the city, OpenStreetMap everywhere else), builds the map data, commits it and redeploys the site.
+on:
+  workflow_dispatch:
+    inputs:
+      city:
+        description: "City name, e.g. Pune, Hyderabad, Jaipur, Lisbon (add the country if the name is ambiguous)"
+        required: true
+        type: string
+      max_projects:
+        description: "Most Magicbricks projects to crawl (0 = all; big cities have 30,000 and take hours)"
+        required: false
+        default: "3000"
+        type: string
+      osm_only:
+        description: "Skip Magicbricks and use OpenStreetMap only"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: add-city
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch and build ${{ inputs.city }}
+        env:
+          CITY: ${{ inputs.city }}
+          MAX: ${{ inputs.max_projects }}
+          OSM_ONLY: ${{ inputs.osm_only }}
+        run: |
+          args=("$CITY")
+          if [ "$MAX" = "0" ]; then args+=(--all); else args+=(--max "$MAX"); fi
+          if [ "$OSM_ONLY" = "true" ]; then args+=(--osm-only); fi
+          cd pipeline && python3 -u add_city.py "${args[@]}" | tee ../add_city.log
+      - name: Commit the new city
+        env:
+          CITY: ${{ inputs.city }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add data/cities.json web/public/data pipeline/out
+          git commit -m "Add city: $CITY" || { echo "nothing new to commit"; exit 0; }
+          git pull --rebase origin main
+          git push origin HEAD:main
+  deploy:
+    needs: build
+    uses: ./.github/workflows/deploy.yml

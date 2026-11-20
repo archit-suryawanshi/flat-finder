@@ -1,6 +1,8 @@
-"""Fetch residential areas and building footprints for a city bbox from Overpass, once.
+"""Fetch residential areas, building footprints, places and housing complexes for a city bbox from Overpass, once.
 
-usage: python osm_fetch.py <city>  -> out/<city>/osm_areas.geojson, out/<city>/osm_buildings.geojson
+usage: python osm_fetch.py <city>            -> out/<city>/osm_areas.geojson, osm_buildings.geojson, osm_pois.json
+       python osm_fetch.py <city> complexes  -> out/<city>/osm_complexes.json (named housing complexes, for cities
+                                                without portal data)
 """
 import json
 import pathlib
@@ -8,6 +10,8 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+
+import net
 
 ROOT = pathlib.Path(__file__).parent
 CACHE = ROOT / "cache" / "osm"
@@ -18,10 +22,12 @@ BBOX = tuple(CITIES[CITY]["bbox"])  # south, west, north, east
 OUT = OUT / CITY
 CACHE = CACHE / CITY
 MIRRORS = [
-    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
+# overpass-api.de answers 406 to clients that do not say who they are
+UA = "flat-finder/0.2 (housing society map; https://github.com/archit-suryawanshi/flat-finder)"
 
 
 def overpass(query, name):
@@ -32,8 +38,8 @@ def overpass(query, name):
     body = urllib.parse.urlencode({"data": query}).encode()
     for url in MIRRORS * 2:
         try:
-            req = urllib.request.Request(url, data=body, headers={"User-Agent": "flat-finder/0.1"})
-            raw = urllib.request.urlopen(req, timeout=300).read()
+            req = urllib.request.Request(url, data=body, headers={"User-Agent": UA, "Accept": "application/json"})
+            raw = net.urlopen(req, timeout=300).read()
             data = json.loads(raw)
             f.write_bytes(raw)
             return data
@@ -102,7 +108,14 @@ def main():
     (OUT / "osm_areas.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
     print("areas", len(feats))
 
-    blds = overpass(f'[out:json][timeout:280];way["building"]{bb};out geom;', "buildings")
+    # only buildings inside named residential areas: those are the only ones a society's shape can use, and a
+    # whole-city building query is too large for most cities
+    try:
+        blds = overpass(f'[out:json][timeout:280];(way["landuse"="residential"]["name"]{bb};relation["landuse"="residential"]["name"]{bb};)->.r;'
+                        f'.r map_to_area->.aa;way["building"](area.aa);out geom;', "buildings_in_areas")
+    except SystemExit:
+        print("buildings: Overpass failed, towers will be drawn from counts", flush=True)
+        blds = {"elements": []}
     bf = []
     for el in blds["elements"]:
         if "geometry" not in el:
@@ -154,8 +167,41 @@ def fetch_pois():
     print("pois", Counter(p["k"] for p in out))
 
 
+COMPLEX_QUERY = """[out:json][timeout:280];(
+  way["building"~"^(apartments|residential)$"]["name"]{bb};relation["building"~"^(apartments|residential)$"]["name"]{bb};
+  way["residential"~"^(apartments|gated|condominium)$"]["name"]{bb};relation["residential"~"^(apartments|gated|condominium)$"]["name"]{bb};
+  node["place"~"^(suburb|neighbourhood|quarter)$"]["name"]{bb};
+);out geom;"""
+
+
+def fetch_complexes():
+    """Named apartment buildings and complexes, plus locality names. Used when no listing portal covers the city."""
+    s, w, n, e = BBOX
+    data = overpass(COMPLEX_QUERY.replace("{bb}", f"({s},{w},{n},{e})"), "complexes")
+    out = []
+    for el in data["elements"]:
+        t = el.get("tags", {})
+        if el["type"] == "node":
+            out.append({"k": "place", "name": t["name"], "lng": round(el["lon"], 5), "lat": round(el["lat"], 5)})
+            continue
+        rings = ring_from_relation(el) if el["type"] == "relation" else [_pts(el.get("geometry") or [])]
+        rings = [r if r[0] == r[-1] else r + [r[0]] for r in rings if len(r) >= 3]
+        if not rings:
+            continue
+        out.append({"k": "complex", "osm": f"{el['type']}/{el['id']}", "name": t["name"], "ring": max(rings, key=len),
+                    "building": t.get("building"), "h": height_of(t), "flats": t.get("building:flats"),
+                    "suburb": t.get("addr:suburb") or t.get("addr:district"), "street": t.get("addr:street"),
+                    "operator": t.get("operator") or t.get("developer"), "website": t.get("website")})
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "osm_complexes.json").write_text(json.dumps(out))
+    from collections import Counter
+    print("complexes", Counter(x["k"] for x in out), flush=True)
+
+
 if __name__ == "__main__":
-    if "pois" in sys.argv:
+    if "complexes" in sys.argv:
+        fetch_complexes()
+    elif "pois" in sys.argv:
         fetch_pois()
     else:
         main()
