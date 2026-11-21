@@ -72,5 +72,22 @@
    19.2351
   ],
   "zoom": 11.8
+ },
+ "navi-mumbai": {
+  "name": "Navi Mumbai",
+  "country": "in",
+  "source": "magicbricks",
+  "magicbricks": "navi-mumbai",
+  "bbox": [
+   18.8935,
+   72.8574,
+   19.1726,
+   73.202
+  ],
+  "center": [
+   73.0297,
+   19.033
+  ],
+  "zoom": 11.9
  }
 }
