@@ -158,11 +158,15 @@ def main(argv):
     CITIES_FILE.write_text(json.dumps(cities, indent=1) + "\n")
     print(f"\nCity id: {city_id}  source: {cfg['source']}", flush=True)
 
+    steps = 4 if mb else 2
+    step = iter(range(1, 5))
     if mb:
+        print(f"Stage {next(step)}/{steps}: Magicbricks list pages", flush=True)
         crawl = ["mb_crawl.py", "list", city_id] + (["--max", str(cap)] if cap else [])
         if cap and total and total > cap:
             print(f"  crawling the first {cap:,} of {total:,} projects (use --all for every one)", flush=True)
         run(*crawl)
+        print(f"Stage {next(step)}/{steps}: Magicbricks project pages", flush=True)
         run("mb_crawl.py", "projects", city_id)
         if city_id != "gurgaon":  # Gurugram's tuned box stays as it is
             cfg["bbox"] = bbox_from_projects(city_id, cfg["bbox"])
@@ -170,9 +174,11 @@ def main(argv):
             cfg["center"] = [round((w + e) / 2, 4), round((s + n) / 2, 4)]
             cfg["zoom"] = zoom_for(cfg["bbox"])
             CITIES_FILE.write_text(json.dumps(cities, indent=1) + "\n")
+    print(f"Stage {next(step)}/{steps}: OpenStreetMap outlines and nearby places (usually 2 to 10 min)", flush=True)
     run("osm_fetch.py", city_id)
     if not mb:
         run("osm_fetch.py", city_id, "complexes")
+    print(f"Stage {next(step)}/{steps}: building the map files", flush=True)
     run("build_city.py", city_id)
     if os.environ.get("GITHUB_OUTPUT"):  # tell the workflow which id to commit
         with open(os.environ["GITHUB_OUTPUT"], "a") as f:

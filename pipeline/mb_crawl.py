@@ -59,13 +59,15 @@ def crawl_list():
     total = mb_parse.parse_total(first)
     pages = -(-min(total, max_projects() or total) // 20)
     projects = {}
+    t0 = time.time()
     for n in range(1, pages + 1):
         html = fetch(LIST_URL.format(n))
         if not html:
             continue
         for c in mb_parse.parse_list_page(html):
             projects[c["psmid"]] = mb_parse.card_to_project(c)
-        print(f"list {n}/{pages}: {len(projects)} projects", flush=True)
+        left = (time.time() - t0) / n * (pages - n) / 60
+        print(f"list pages {n}/{pages}: {len(projects)} projects, ~{left:.0f} min left for the list", flush=True)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "mb_index.json").write_text(json.dumps(list(projects.values()), indent=0))
     print("total reported", total, "collected", len(projects), flush=True)
@@ -85,11 +87,13 @@ def crawl_projects():
         return {**p, **{k: v for k, v in detail.items() if v not in (None, [], "")}}
 
     out = []
+    t0 = time.time()
     with ThreadPoolExecutor(max_workers=3) as ex:
         for i, merged in enumerate(ex.map(one, index), 1):
             out.append(merged)
-            if i % 100 == 0 or i == len(index):
-                print(f"project {i}/{len(index)}", flush=True)
+            if i % 50 == 0 or i == len(index):
+                left = (time.time() - t0) / i * (len(index) - i) / 60
+                print(f"project pages {i}/{len(index)}, ~{left:.0f} min left for project pages", flush=True)
                 (OUT / "mb_projects.json").write_text(json.dumps(out, indent=0))
 
 
