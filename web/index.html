@@ -8,33 +8,41 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="nolog">
   <div id="map"></div>
 
   <div class="topbar">
     <button id="btn-guide" title="How this works">Guide</button>
-    <button id="btn-replay" title="Replay the intro">Replay</button>
     <button id="btn-tour" title="Fly through the matches">Tour</button>
     <button id="btn-theme" title="Light or dark" aria-label="Switch light or dark"></button>
-    <button id="btn-log" title="Show or hide the right panel">Research log</button>
-    <button id="btn-hide" title="Hide panels for recording">Hide panels</button>
-    <button id="btn-mhide" class="mobile-only" title="Show or hide the panel">Hide panel</button>
+    <button id="btn-replay" class="demo-only" title="Replay the intro">Replay</button>
+    <button id="btn-log" class="demo-only off" title="Show or hide the research log">Research log</button>
+    <button id="btn-hide" class="demo-only" title="Hide panels for recording">Hide panels</button>
   </div>
 
-  <div class="mtabs" id="mtabs"><button data-t="search" class="on">Search</button><button data-t="society" id="mt-society" disabled>Society</button><button class="collapse" id="m-collapse" aria-label="Collapse panel">⌄</button></div>
+  <div class="mtabs" id="mtabs">
+    <div class="grab" aria-hidden="true"><i></i></div>
+    <button data-t="search" class="on">Search</button><button data-t="society" id="mt-society" disabled>Tap a building</button>
+  </div>
 
   <aside class="panel left" id="filters">
     <div class="k">Flat Finder · <select id="city-pick" aria-label="City"></select></div>
     <h1 class="ttl">Find the flat that fits.</h1>
     <div class="search">
-      <input id="q" type="search" placeholder="Search a society, developer or sector" autocomplete="off" aria-label="Search societies">
+      <input id="q" type="search" placeholder="Search a society, developer or area" autocomplete="off" aria-label="Search societies">
       <kbd>/</kbd>
       <ol id="q-results" hidden></ol>
     </div>
-    <div class="row-between">
-      <div class="seg" id="f-mode"><button data-m="buy">Buy</button><button data-m="rent">Rent</button></div>
-    </div>
+    <div class="seg" id="f-mode"><button data-m="buy">Buy</button><button data-m="rent">Rent</button></div>
     <div class="pill" id="q-pill" hidden></div>
+
+    <div class="summary" id="summary" aria-live="polite">
+      <div class="sum-top">
+        <div><span class="n" id="count">0</span> <span class="what" id="count-what">societies match</span></div>
+        <span class="row-gap"><button class="linkbtn" id="btn-reset" hidden>Reset</button><button class="linkbtn phone-only" id="btn-see">See results ↓</button></span>
+      </div>
+      <div class="sub" id="count-sub"></div>
+    </div>
 
     <section>
       <div class="k">Type</div>
@@ -47,8 +55,8 @@
     <section>
       <div class="k row">Smallest bedroom <span class="seg small" id="f-room-mode"><button data-r="off">Any</button><button data-r="area">Area</button></span></div>
       <div id="f-area">
-        <div class="k row"><span class="seg small" id="f-area-unit"><button data-u="gaj">Gaj</button><button data-u="sqft">Sq ft</button></span><span class="val" id="v-area"></span></div>
-        <input type="range" id="f-area-range" min="8" max="30" step="0.25" value="15.3">
+        <div class="k row"><span class="seg small" id="f-area-unit"><button data-u="sqft">Sq ft</button><button data-u="gaj">Gaj</button></span><span class="val" id="v-area"></span></div>
+        <input type="range" id="f-area-range" min="8" max="30" step="0.25" value="15.3" aria-label="Smallest bedroom area">
       </div>
       <div class="hint" id="room-hint">Every bedroom must clear it.</div>
       <label class="sw"><input type="checkbox" id="f-est" checked> Include "probably fits" (estimated from unit size)</label>
@@ -84,17 +92,15 @@
         <button class="linkbtn" id="btn-share">Share list</button>
       </div>
     </section>
+  </aside>
 
-    <div class="count">
-      <div class="k">Matching societies</div>
-      <div class="n" id="count">0</div>
-      <div class="sub" id="count-sub"></div>
-    </div>
-    <div class="k row">Results <select id="f-sort" aria-label="Sort results">
+  <aside class="panel right" id="resbox">
+    <div class="k row">Results <span class="row-gap"><button class="linkbtn" id="btn-share-search" title="Copy a link to this search">Share this search</button><select id="f-sort" aria-label="Sort results">
       <option value="best">Best match</option><option value="score">Flat Finder score</option><option value="rating">Resident rating</option>
-      <option value="price">Price, low to high</option><option value="listings">Most listings</option></select></div>
+      <option value="price">Price, low to high</option><option value="listings">Most listings</option></select></span></div>
+    <label class="sw" id="onscreen-row"><input type="checkbox" id="f-onscreen"> Only what's on the map</label>
+    <div class="unknown-note" id="unknown-note" hidden></div>
     <div id="results"></div>
-
     <div class="downloads">
       <div class="k">Download</div>
       <button class="dl" id="dl-results"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg><span><b>These results</b><small>CSV of what your filters match</small></span></button>
@@ -146,7 +152,7 @@
     <div class="sheet">
       <h3>Add societies to my list</h3>
       <p class="fine">Paste names, one per line or separated by commas. We match each to the closest society.</p>
-      <textarea id="paste-text" rows="7" placeholder="Heritage One&#10;Pioneer Araya&#10;DLF Camellias"></textarea>
+      <textarea id="paste-text" rows="7"></textarea>
       <div class="fine" id="paste-result"></div>
       <div class="row-between"><button class="linkbtn" id="paste-clear">Clear my list</button><span class="row-gap"><button class="ghost" id="paste-cancel">Close</button><button class="primary" id="paste-add">Add to my list</button></span></div>
     </div>

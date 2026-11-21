@@ -1,9 +1,9 @@
 import './style.css';
 import maplibregl from 'maplibre-gl';
-import { addBaseLayers, addSocietyLayers, BASE_MODES, createMap, OVERVIEW, setBaseMode, setHighlights, setSelected, setStates, startPulse } from './map.js';
+import { addBaseLayers, addSocietyLayers, BASE_MODES, createMap, OVERVIEW, setBaseMode, setHighlights, setHover, setSelected, setStates, startPulse } from './map.js';
 import { searchSocieties } from './search.js';
 import { createFeed } from './feed.js';
-import { AMENITY_KEYS, DEFAULT_CRITERIA, NEAR, RANK, feetLabel, formatINR, listingsUrl, matchSociety, matchUnit, priceFor, roomPasses } from './filters.js';
+import { AMENITY_KEYS, BUY_STEPS, DEFAULT_CRITERIA, NEAR, RANK, RENT_STEPS, activeFilters, critFromParams, critToParams, feetLabel, formatINR, hasAmenity, listingsUrl, matchSociety, matchUnit, priceFor, roomPasses, scoreOf, stepIndex, typicalResidents } from './filters.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -12,6 +12,8 @@ const REPO = 'https://github.com/archit-suryawanshi/flat-finder';
 const ADD_CITY = `${REPO}/actions/workflows/add-city.yml`;
 const HERE = location.origin + location.pathname; // works at a domain root or under a path (GitHub Pages)
 const params = new URLSearchParams(location.search);
+const demo = params.has('demo'); // Replay, Hide panels and the research log are for recording demos
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const store = { // localStorage can be missing or blocked: never let it break the page
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } },
@@ -26,11 +28,11 @@ const KINDS = [
 const AMEN_LABELS = { squash: 'Squash', pool: 'Pool', gym: 'Gym', club: 'Clubhouse', tennis: 'Tennis', badminton: 'Badminton', jogging: 'Jogging track', kids: 'Kids play' };
 const STATE_LABEL = { match: 'Matches your search', likely: 'Likely match', probable: 'Probably fits (estimated)', unknown: 'Not checked yet', no: 'Does not match' };
 
-let crit = structuredClone(DEFAULT_CRITERIA);
+let crit = critFromParams(params);
 let baseMode = BASE_MODES.includes(params.get('map')) ? params.get('map') : 'streets';
-let roomMode = 'off', areaUnit = 'gaj', sortBy = 'best';
+let roomMode = crit.roomArea ? 'area' : 'off', areaUnit = 'sqft', sortBy = ['score', 'rating', 'price', 'listings'].includes(params.get('sort')) ? params.get('sort') : 'best';
 let data, byId, map, feed, selected = null, states = new Map(), tourTimer = null, cityId = 'pune', details = null;
-let myList = [], allAmenities = [];
+let myList = [], allAmenities = [], amenOrder = Object.keys(AMENITY_KEYS), typical = 7, onScreen = false, pendingIntro = false;
 const highlights = { glow: true, bounds: true, labels: true, ...store.get('ff-highlights', {}) };
 
 function notBuilt(name, cities) {
@@ -65,6 +67,15 @@ async function boot() {
   const portal = (city.city.source || 'magicbricks') === 'magicbricks';
   document.title = `Flat Finder · ${city.city.name}`;
 
+  typical = typicalResidents(city.societies);
+  // amenity chips in the order they are common here (Gym and Pool first in Mumbai, not Squash)
+  const have = Object.fromEntries(Object.keys(AMENITY_KEYS).map((k) => [k, city.societies.filter((s) => hasAmenity(s, k)).length]));
+  amenOrder = Object.keys(AMENITY_KEYS).filter((k) => have[k] || crit.amenities.includes(k)).sort((a, b) => have[b] - have[a]);
+  const examples = [...city.societies].filter((s) => s.rating_count).sort((a, b) => b.rating_count - a.rating_count).slice(0, 3).map((s) => s.name);
+  $('paste-text').placeholder = (examples.length ? examples : city.societies.slice(0, 3).map((s) => s.name)).join('\n');
+  if (demo) document.body.classList.add('demo');
+  if (mobile) { $('filters').append($('resbox')); $('resbox').className = 'resbox'; }
+
   const freq = new Map();
   for (const s of city.societies) for (const a of s.amenities) freq.set(a, (freq.get(a) || 0) + 1);
   allAmenities = [...freq].sort((a, b) => b[1] - a[1]).map(([a, n]) => ({ name: a, n }));
@@ -79,17 +90,21 @@ async function boot() {
   $('dl-units').href = `data/${cityId}-units.csv`;
   $('dl-results').onclick = exportResults;
 
-  feed = createFeed($('feed'), $('log-mode'), { events: city.events, byId });
+  feed = demo ? createFeed($('feed'), $('log-mode'), { events: city.events, byId }) : { ambient() {}, play() {}, sweep() {}, stop() {} };
   buildFilters();
   buildSearch();
+  if (crit.q) { $('q').value = crit.q; setQuery(crit.q, { fit: false }); }
   buildList();
   buildControls();
   buildOnboarding();
   buildMobile();
   hintTilt();
+  applyFilters(); // the list and count show at once; the map catches up when its style has loaded
   try {
     map = createMap('map', { mobile });
     window.__map = map; // handy for debugging in the console
+    map.setPadding(padding());
+    if (!mobile) addEventListener('resize', () => map.setPadding(padding()));
   } catch {
     $('note').textContent = 'Your browser could not start WebGL, so the 3D map is off. Filters and results still work.';
     applyFilters();
@@ -100,6 +115,7 @@ async function boot() {
     type: 'Feature', properties: { sid: s.id, name: s.name, show: 1 }, geometry: { type: 'Point', coordinates: [s.lng, s.lat] } })) };
   map.once('style.load', () => {
     addSocietyLayers(map, shapes, points);
+    states = new Map(); // the new layers have no colours yet: the next applyFilters paints every society
     addBaseLayers(map);
     setBaseMode(map, baseMode);
     setHighlights(map, highlights);
@@ -108,9 +124,10 @@ async function boot() {
     for (const ev of ['dragstart', 'wheel', 'touchstart']) map.on(ev, (e) => { if (e.originalEvent) stopTour(); });
     for (const l of ['bld', 'site-fill', 'glow']) {
       map.on('click', l, (e) => { stopTour(); openSociety(e.features[0].properties.sid); });
-      map.on('mouseenter', l, () => (map.getCanvas().style.cursor = 'pointer'));
-      map.on('mouseleave', l, () => (map.getCanvas().style.cursor = ''));
+      map.on('mousemove', l, (e) => { map.getCanvas().style.cursor = 'pointer'; hover(e.features[0].properties.sid, 'map'); });
+      map.on('mouseleave', l, () => { map.getCanvas().style.cursor = ''; hover(null); });
     }
+    map.on('moveend', () => { if (onScreen) renderResults(); });
     intro();
   });
 }
@@ -123,14 +140,16 @@ function intro() {
     setTimeout(() => openSociety(params.get('open')), 300);
     return;
   }
-  if (mobile || params.has('nointro')) {
-    if (!mobile) map.jumpTo(OVERVIEW);
+  if (mobile || calm || params.has('nointro')) {
+    map.jumpTo(OVERVIEW);
     applyFilters(true);
     feed.ambient();
     return;
   }
   setStates(map, data.societies.map((s) => [s.id, 'no']));
+  states = new Map(); // so the wave after the fly-in repaints every society, on Replay too
   map.jumpTo({ center: [78.5, 22.5], zoom: 2.2, pitch: 0, bearing: 0 });
+  if (!$('onboard').hidden) { pendingIntro = true; return; } // fly in once the welcome sheet closes, so it is seen
   setTimeout(() => {
     map.flyTo({ ...OVERVIEW, duration: 4250, curve: 1.6, essential: true });
     feed.sweep(data.societies, 4500);
@@ -151,12 +170,16 @@ const toggle = (arr, v) => { const i = arr.indexOf(v); i >= 0 ? arr.splice(i, 1)
 // Two-handle slider: a low and a high end, with a value bubble on the handle being moved or hovered.
 function dualRange(el, { min, max, step, fmt, onChange }) {
   el.classList.add('dual');
-  el.innerHTML = '<div class="track"><i></i></div><input type="range" class="lo" aria-label="Lowest"><input type="range" class="hi" aria-label="Highest"><b class="bubble blo"></b><b class="bubble bhi"></b>';
+  el.innerHTML = '<div class="hist" aria-hidden="true"></div><div class="track"><i></i></div><input type="range" class="lo" aria-label="Lowest"><input type="range" class="hi" aria-label="Highest"><b class="bubble blo"></b><b class="bubble bhi"></b>';
   const lo = el.querySelector('.lo'), hi = el.querySelector('.hi'), fill = el.querySelector('.track i');
   const api = {
     cfg: { min, max, step, fmt },
     set(a, b) { lo.value = a; hi.value = b; api.paint(); },
     get() { return [+lo.value, +hi.value]; },
+    hist(counts) { // faint bars showing where this city's homes are on the track
+      const top = Math.max(1, ...counts);
+      el.querySelector('.hist').innerHTML = counts.map((n) => `<i style="height:${n ? 8 + 92 * Math.sqrt(n / top) : 0}%"></i>`).join('');
+    },
     reconfig(c) { Object.assign(api.cfg, c); for (const r of [lo, hi]) { r.min = api.cfg.min; r.max = api.cfg.max; r.step = api.cfg.step; } },
     paint() {
       const { min: a, max: b, fmt: f } = api.cfg;
@@ -192,10 +215,11 @@ function buildFilters() {
   };
   sizeSlider = dualRange($('f-size'), { min: 0, max: 8000, step: 50, fmt: (v, end) => (end === 'hi' && v >= 8000 ? 'Any' : `${v.toLocaleString()} sq ft · ${Math.round(v / 9)} gaj`),
     onChange: (a, b) => { crit.minSqft = a; crit.maxSqft = b >= 8000 ? null : b; labels(); applyFilters(); } });
-  priceSlider = dualRange($('f-price'), { min: 0, max: 20, step: 0.25, fmt: (v) => v, onChange: (a, b) => {
-    const top = priceSlider.cfg.max, unit = crit.mode === 'rent' ? 1000 : 1e7;
-    if (crit.mode === 'rent') { crit.minRent = a > 0 ? a * unit : null; crit.maxRent = b >= top ? null : b * unit; }
-    else { crit.minPrice = a > 0 ? a * unit : null; crit.maxPrice = b >= top ? null : b * unit; }
+  // the budget track moves in steps: 5 L steps under 1 Cr, wider ones above, so the common range gets most of the track
+  priceSlider = dualRange($('f-price'), { min: 0, max: BUY_STEPS.length - 1, step: 1, fmt: (v) => v, onChange: (a, b) => {
+    const st = crit.mode === 'rent' ? RENT_STEPS : BUY_STEPS, top = st.length - 1;
+    if (crit.mode === 'rent') { crit.minRent = a > 0 ? st[a] : null; crit.maxRent = b >= top ? null : st[b]; }
+    else { crit.minPrice = a > 0 ? st[a] : null; crit.maxPrice = b >= top ? null : st[b]; }
     labels(); applyFilters();
   } });
   redrawFilters = () => {
@@ -204,7 +228,7 @@ function buildFilters() {
       toggle(crit.bhk, n); if (n === 5) toggle(crit.bhk, 6); redrawFilters(); applyFilters(); })));
     const custom = crit.amenities.filter((k) => k.startsWith('n:'));
     $('f-amen').replaceChildren(
-      ...Object.keys(AMENITY_KEYS).map((k) => chip(AMEN_LABELS[k], crit.amenities.includes(k), () => { toggle(crit.amenities, k); redrawFilters(); applyFilters(); })),
+      ...amenOrder.map((k) => chip(AMEN_LABELS[k], crit.amenities.includes(k), () => { toggle(crit.amenities, k); redrawFilters(); applyFilters(); })),
       ...custom.map((k) => chip(`${esc(allAmenities.find((a) => a.name.toLowerCase() === k.slice(2))?.name || k.slice(2))} ×`, true, () => { toggle(crit.amenities, k); redrawFilters(); applyFilters(); })),
       chip($('amen-more').hidden ? `More (${allAmenities.length})` : 'Fewer', false, () => { $('amen-more').hidden = !$('amen-more').hidden; redrawFilters(); if (!$('amen-more').hidden) { amenList(); $('amen-q').focus(); } }, 'chip more-chip'));
     $('f-near').replaceChildren(...Object.entries(NEAR).map(([k, n]) => chip(`${n.label} <small>${n.m >= 1000 ? n.m / 1000 + ' km' : n.m + ' m'}</small>`, crit.near.includes(k), () => { toggle(crit.near, k); redrawFilters(); applyFilters(); })));
@@ -217,10 +241,12 @@ function buildFilters() {
     $('f-est').checked = crit.estimates !== false;
     if (crit.roomArea) $('f-area-range').value = crit.roomArea / 9;
     sizeSlider.set(crit.minSqft || 0, crit.maxSqft ?? 8000);
-    const rent = crit.mode === 'rent';
-    priceSlider.reconfig(rent ? { min: 0, max: 500, step: 5, fmt: (v, end) => (end === 'hi' && v >= 500 ? 'Any' : v ? `${formatINR(v * 1000)}/mo` : '₹0') }
-      : { min: 0, max: 20, step: 0.25, fmt: (v, end) => (end === 'hi' && v >= 20 ? 'Any' : v ? formatINR(v * 1e7) : '₹0') });
-    priceSlider.set(rent ? (crit.minRent || 0) / 1000 : (crit.minPrice || 0) / 1e7, rent ? (crit.maxRent ? crit.maxRent / 1000 : 500) : (crit.maxPrice ? crit.maxPrice / 1e7 : 20));
+    const rent = crit.mode === 'rent', st = rent ? RENT_STEPS : BUY_STEPS, top = st.length - 1;
+    priceSlider.reconfig({ min: 0, max: top, step: 1, fmt: (i, end) => (end === 'hi' && i >= top ? 'Any' : i ? formatINR(st[i]) + (rent ? '/mo' : '') : '₹0') });
+    priceSlider.set(stepIndex(st, rent ? crit.minRent || 0 : crit.minPrice || 0), stepIndex(st, rent ? crit.maxRent : crit.maxPrice));
+    const hist = new Array(top + 1).fill(0);
+    for (const s of data.societies) { const p = priceFor(s, crit.mode, crit.bhk); if (p) hist[stepIndex(st, p.value)]++; }
+    priceSlider.hist(hist);
     $('f-ready').checked = crit.ready;
     $('f-only').checked = !!crit.only;
     if (!$('amen-more').hidden) amenList();
@@ -249,7 +275,22 @@ function buildFilters() {
   $('f-est').onchange = () => { crit.estimates = $('f-est').checked; applyFilters(); };
   $('amen-q').oninput = amenList;
   $('f-ready').onchange = () => { crit.ready = $('f-ready').checked; applyFilters(); };
+  $('f-sort').value = sortBy;
   $('f-sort').onchange = () => { sortBy = $('f-sort').value; renderResults(); };
+  $('f-onscreen').onchange = () => { onScreen = $('f-onscreen').checked; renderResults(); };
+  $('btn-reset').onclick = () => {
+    crit = { ...structuredClone(DEFAULT_CRITERIA), only: crit.only };
+    roomMode = 'off';
+    $('q').value = '';
+    setQuery('', { fit: false });
+    redrawFilters();
+    applyFilters();
+  };
+  $('btn-share-search').onclick = async () => {
+    writeUrl();
+    try { await navigator.clipboard.writeText(location.href); toast('Link to this search copied.'); } catch { prompt('Copy this link', location.href); }
+  };
+  $('btn-see').onclick = () => { sheetTo('full'); setTimeout(() => $('resbox').scrollIntoView({ behavior: calm ? 'auto' : 'smooth', block: 'start' }), calm ? 0 : 250); };
   $('btn-replay').onclick = intro;
   $('btn-tour').onclick = tour;
   $('btn-hide').onclick = () => document.body.classList.toggle('bare');
@@ -285,9 +326,12 @@ const dist = (s, c) => (s.lng - c[0]) ** 2 + (s.lat - c[1]) ** 2;
 
 function sorted(list) {
   const price = (s) => priceFor(s, crit.mode, crit.bhk)?.value ?? Infinity;
+  // scores without resident ratings count the city's typical rating, and rated societies win ties
+  const sc = (s) => scoreOf(s, typical)?.value || 0;
+  const byScore = (a, b) => sc(b) - sc(a) || (b.rating ? 1 : 0) - (a.rating ? 1 : 0) || (b.rating_count || 0) - (a.rating_count || 0);
   const by = {
-    best: (a, b) => RANK[states.get(b.id)] - RANK[states.get(a.id)] || b.verified - a.verified || (b.score || 0) - (a.score || 0),
-    score: (a, b) => (b.score || 0) - (a.score || 0),
+    best: (a, b) => RANK[states.get(b.id)] - RANK[states.get(a.id)] || b.verified - a.verified || byScore(a, b),
+    score: byScore,
     rating: (a, b) => (b.rating || 0) - (a.rating || 0) || (b.rating_count || 0) - (a.rating_count || 0),
     price: (a, b) => price(a) - price(b),
     listings: (a, b) => ((b.sale_count || 0) + (b.rent_count || 0)) - ((a.sale_count || 0) + (a.rent_count || 0)),
@@ -295,27 +339,48 @@ function sorted(list) {
   return list.sort(by);
 }
 
+const FITS = ['match', 'likely', 'probable'];
 function ranked() {
-  return sorted(data.societies.filter((s) => ['match', 'likely', 'probable'].includes(states.get(s.id))));
+  const keep = crit.unknown ? [...FITS, 'unknown'] : FITS;
+  let list = data.societies.filter((s) => keep.includes(states.get(s.id)));
+  if (onScreen && map) { const b = map.getBounds(); list = list.filter((s) => b.contains([s.lng, s.lat])); }
+  return sorted(list);
 }
 
-const shown = { match: 25, likely: 25, probable: 25 };
+// What the "no data" societies are missing, in the words of the filter that needs it
+const missing = () => (crit.room || crit.roomArea ? 'bedroom size' : crit.bhk.length ? 'BHK' : 'home size');
+
+const shown = { match: 25, likely: 25, probable: 25, fit: 25, unknown: 25 };
 function renderResults() {
   const counts = { match: 0, likely: 0, probable: 0, unknown: 0 };
   for (const st of states.values()) if (st in counts) counts[st]++;
-  animateNumber($('count'), counts.match + counts.likely + counts.probable);
+  const total = counts.match + counts.likely + counts.probable + (crit.unknown ? counts.unknown : 0);
+  animateNumber($('count'), total);
+  $('count-what').textContent = total === 1 ? 'society matches' : 'societies match';
   const rooms = crit.room || crit.roomArea;
   const bits = [];
   if (rooms) bits.push(`${counts.match} verified`, `${counts.likely} likely`, `${counts.probable} probably fit`);
-  if (counts.unknown) bits.push(`${counts.unknown.toLocaleString()} not checked yet`);
-  $('count-sub').textContent = bits.join(' · ');
+  if (counts.unknown) bits.push(crit.unknown ? `including ${counts.unknown.toLocaleString()} with no ${missing()} data` : `${counts.unknown.toLocaleString()} more have no ${missing()} data`);
+  $('count-sub').innerHTML = esc(bits.join(' · ')) + (counts.unknown ? ` <button class="linkbtn unk-toggle">${crit.unknown ? 'Leave them out' : 'Include them'}</button>` : '');
+  $('unknown-note').hidden = !counts.unknown;
+  $('unknown-note').innerHTML = counts.unknown ? `<b>${counts.unknown.toLocaleString()}</b> societies have no ${missing()} data on Magicbricks, so we can't tell whether they fit. They are the grey buildings on the map. <button class="linkbtn unk-toggle">${crit.unknown ? 'Leave them out' : 'Include them'}</button>` : '';
+  document.querySelectorAll('.unk-toggle').forEach((b) => (b.onclick = () => { crit.unknown = !crit.unknown; renderResults(); }));
+  const nf = activeFilters(crit);
+  $('btn-reset').hidden = !nf && !crit.q;
+  $('btn-reset').textContent = nf > 1 ? `Reset ${nf} filters` : 'Reset';
   $('v-list').textContent = myList.length ? `${myList.length} saved` : 'empty';
   const groups = rooms
     ? [['match', 'Rooms read from floor plans: every bedroom passes'], ['likely', 'Likely: rooms read so far pass'], ['probable', 'Probably fits: estimated from unit size, plans not read yet']]
-    : [['match', null]];
+    : [['fit', null]];
+  if (crit.unknown) groups.push(['unknown', `No ${missing()} data yet: may or may not fit`]);
   const all = ranked();
+  if (!all.length) {
+    $('results').innerHTML = `<p class="fine empty">${onScreen ? 'Nothing matching in this part of the map. Zoom out or untick "Only what\'s on the map".' : 'No society fits every filter. Loosen one, or include the societies with no data.'}</p>`;
+    writeUrl();
+    return;
+  }
   $('results').replaceChildren(...groups.flatMap(([st, title]) => {
-    const list = rooms ? all.filter((s) => states.get(s.id) === st) : all;
+    const list = st === 'fit' ? all.filter((s) => FITS.includes(states.get(s.id))) : all.filter((s) => states.get(s.id) === st);
     if (!list.length) return [];
     const out = [];
     if (title) { const h = document.createElement('div'); h.className = `group ${st}`; h.textContent = `${title} (${list.length})`; out.push(h); }
@@ -326,22 +391,51 @@ function renderResults() {
     if (list.length > shown[st]) out.push(chip(`Show more (${list.length - shown[st]} left)`, false, () => { shown[st] += 50; renderResults(); }, 'linkbtn'));
     return out;
   }));
+  writeUrl();
+}
+
+// The search lives in the address bar: reload keeps it, and the link can be sent to someone
+function writeUrl() {
+  const q = critToParams(crit, new URLSearchParams(location.search));
+  sortBy === 'best' ? q.delete('sort') : q.set('sort', sortBy);
+  selected ? q.set('open', selected) : q.delete('open');
+  const next = q.toString() ? `?${q}` : location.pathname;
+  if (next !== location.search) history.replaceState(null, '', next);
+}
+
+let hovered = null;
+function hover(sid, from) {
+  if (sid === hovered) return;
+  if (map) setHover(map, sid, hovered);
+  document.querySelector('.results li.hov')?.classList.remove('hov');
+  hovered = sid;
+  if (!sid) return;
+  const li = document.querySelector(`.results li[data-sid="${sid}"]`);
+  li?.classList.add('hov');
+  if (from === 'map' && li && !mobile) li.scrollIntoView({ block: 'nearest' });
 }
 
 function resultItem(s) {
   const li = document.createElement('li');
   const st = states.get(s.id);
   const p = priceFor(s, crit.mode, crit.bhk);
-  const money = p ? `${p.estimated ? '~' : ''}${formatINR(p.value)}${crit.mode === 'rent' ? '/mo' : ''}` : '';
+  const money = p ? `${formatINR(p.value)}${crit.mode === 'rent' ? '/mo' : ''}` : '';
   const how = s.verified ? ' · checked by hand' : s.ai_read ? ' · AI-read plans' : '';
+  const sc = scoreOf(s, typical);
+  li.dataset.sid = s.id;
+  li.tabIndex = 0;
   li.innerHTML = `<span class="nm">${myList.includes(s.id) ? '★ ' : ''}${esc(s.name)}<small>${esc(s.locality || '')}${how}</small></span>
-    <span class="tag ${st}">${money}${s.score != null ? `<small>score ${s.score}</small>` : ''}</span>`;
+    <span class="tag ${st}">${p ? (p.estimated ? `<span class="estp" title="Our estimate, not a listing">~${money} <small>est.</small></span>` : `<span>${money}</span>`) : ''}${sc ? `<small${sc.partial ? ' title="No resident ratings yet: scored with the city\'s typical rating"' : ''}>score ${sc.value}${sc.partial ? ' · no ratings' : ''}</small>` : ''}</span>`;
   li.onclick = () => { stopTour(); openSociety(s.id); };
+  li.onkeydown = (e) => { if (e.key === 'Enter') li.onclick(); };
+  li.onmouseenter = () => hover(s.id, 'list');
+  li.onmouseleave = () => hover(null);
   return li;
 }
 
 function animateNumber(el, to) {
   const from = +el.textContent.replace(/,/g, '') || 0;
+  if (calm || from === to) { el.textContent = to.toLocaleString(); return; }
   const t0 = performance.now();
   const step = (t) => {
     const k = Math.max(0, Math.min(1, (t - t0) / 700));
@@ -357,12 +451,12 @@ function openSociety(sid, { fly = true } = {}) {
   if (!s) return;
   if (map) setSelected(map, sid, selected);
   selected = sid;
-  if (fly && map) map.flyTo({ center: [s.lng, s.lat], zoom: mobile ? 15.4 : 16.2, pitch: is3d ? 55 : 0, bearing: 0, duration: 2600, essential: true,
-    offset: mobile ? [0, -80] : [-180, 0] });
-  document.body.classList.add('has-card');
   if (mobile) showMobile('society');
+  if (fly && map) go({ center: [s.lng, s.lat], zoom: mobile ? 15.4 : 16.2, pitch: is3d ? 55 : 0, bearing: 0, duration: 2600 });
+  document.body.classList.add('has-card');
   renderCard(s);
   feed.play(sid);
+  writeUrl();
 }
 
 function closeCard() {
@@ -372,6 +466,20 @@ function closeCard() {
   if (map && selected) setSelected(map, null, selected);
   selected = null;
   feed?.ambient();
+  if (data) writeUrl();
+}
+
+// Fly, or jump when the system asks for less motion. The map's padding keeps the target in the visible part.
+function go(cam) {
+  if (!map) return;
+  calm ? map.jumpTo(cam) : map.flyTo({ ...cam, essential: true });
+}
+
+// The map area people can see: between the two panels on a laptop, above the sheet on a phone
+function padding() {
+  if (mobile) return { top: 56, bottom: sheetH() + 46, left: 0, right: 0 };
+  const w = innerWidth, left = Math.min(330, w * 0.3) + 20, right = Math.min(400, w * 0.32) + 20;
+  return { top: 64, bottom: 24, left, right };
 }
 
 const metres = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m / 10) * 10} m`);
@@ -415,10 +523,10 @@ function renderCard(s) {
   const issue = `${REPO}/issues/new?title=${encodeURIComponent('Research: ' + s.name)}&body=${encodeURIComponent(`Please verify room sizes and amenities for ${s.name} (${s.locality || ''}).\n\nPortal page: ${s.url}\n${s.brochure_url ? 'Brochure: ' + s.brochure_url : ''}`)}`;
   const facts2 = [s.towers && `${s.towers} towers`, s.units && `${Number(s.units).toLocaleString()} units`, s.acres && `${s.acres} acres`, s.status, s.possession && `possession ${s.possession}`].filter(Boolean).join(' · ');
   const counts = (s.sale_count || s.rent_count) ? `${(s.sale_count || 0).toLocaleString()} for sale · ${(s.rent_count || 0).toLocaleString()} for rent now` : 'No live listings';
-  const parts = s.score_parts || {};
-  const score = s.score != null ? `<div class="score"><div class="big">${s.score}<small>/10</small></div><div class="parts">
-      ${parts.residents != null ? `<span>Residents <b>${parts.residents}</b></span>` : '<span class="fine">No resident ratings yet</span>'}<span>Nearby <b>${parts.nearby}</b></span><span>Amenities <b>${parts.amenities}</b></span>
-      <span class="fine">Flat Finder score: residents' rating 50%, what is nearby 30%, amenities 20%</span></div></div>` : '';
+  const parts = s.score_parts || {}, sc = scoreOf(s, typical);
+  const score = sc ? `<div class="score${sc.partial ? ' partial' : ''}"><div class="big" title="Flat Finder score out of 10">${sc.value}<small>/10</small>${sc.partial ? '<em>partial</em>' : ''}</div><div class="parts">
+      ${parts.residents != null ? `<span>Residents <b>${parts.residents}</b></span>` : `<span>Residents <b class="muted">none yet</b></span>`}<span>Nearby <b>${parts.nearby}</b></span><span>Amenities <b>${parts.amenities}</b></span>
+      <details class="why"><summary>What this score means</summary><span class="fine">Residents' rating counts 50%, what is within reach 30% (park 500 m, metro or rail 1.5 km, school 1 km, hospital 2 km, shops 1.5 km), amenities 20%.${sc.partial ? ` Nobody has rated ${esc(s.name)} yet, so its rating is counted as this city's typical ${(typical / 2).toFixed(1)}★ rather than left out. That keeps it from beating societies residents actually rate well.` : ''}</span></details></div></div>` : '';
   const near = s.nearby || {};
   const nearRows = [['park', 'Park'], ['metro', 'Metro'], ['rail', 'Rail station'], ['school', 'School'], ['hospital', 'Hospital'], ['shopping', 'Mall or supermarket']]
     .filter(([k]) => near[k]).map(([k, l]) => `<div><span>${l}</span><b>${metres(near[k].m)}</b><small>${esc(near[k].name || '')}${near[k].n > 1 ? ` · ${near[k].n} within 1 km` : ''}</small></div>`).join('');
@@ -426,6 +534,8 @@ function renderCard(s) {
   const reviews = d?.reviews?.length ? `<div class="reviews">${d.reviews.slice(0, 3).map((r) => `<blockquote>${esc(r.text)}<cite>${esc(r.by || 'Resident')}${r.date ? ' · ' + esc(r.date) : ''}</cite></blockquote>`).join('')}</div>` : '';
   const trend = d?.trend?.length > 1 ? sparkline(d.trend) : '';
   const about = d?.description ? `<details><summary>About this project</summary><p class="fine">${esc(d.description)}</p></details>` : '';
+  const trail = (data.events || []).filter((e) => e.sid === s.id);
+  const how = trail.length ? `<details class="trail"><summary>How we know this (${trail.length} step${trail.length > 1 ? 's' : ''})</summary><ol>${trail.map((e) => `<li>${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.step)}</a>` : esc(e.step)}: <b>${esc(e.finding)}</b></li>`).join('')}</ol></details>` : '';
   const inList = myList.includes(s.id);
   const photos = d?.images?.length ? `<div class="photos">${d.images.map((im) => `<a href="${esc(im.full)}" target="_blank" rel="noopener"><img src="${esc(im.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentElement.remove()"></a>`).join('')}</div><div class="fine">Photos: Magicbricks, opens full size</div>` : '';
   $('card').innerHTML = `
@@ -449,6 +559,7 @@ function renderCard(s) {
     ${ratingBars ? `<h4>What residents rate</h4>${ratingBars}` : ''}${reviews}
     ${facts || amen ? `<h4>Amenities (${s.amenities.length})</h4><div class="amen">${facts}${amen}</div>` : ''}
     ${about}
+    ${how}
     <div class="links">
       <a class="btnlink" href="${esc(s.gmaps)}" target="_blank" rel="noopener">Google Maps and reviews</a>
       <a class="btnlink" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" rel="noopener">Directions</a>
@@ -472,6 +583,7 @@ const modeCount = (s, mode) => (mode === 'rent' ? s.rent_count : s.sale_count) |
 const hasListings = (s, mode, bhk) => !!s.prices?.[bhk]?.[mode === 'rent' ? 'rent' : 'buy'];
 function listingButtons(s) {
   const btn = (mode, n) => {
+    if (!n) return ''; // counts can be missing: no button, and never a crash that stops the card opening
     const beds = crit.bhk.filter((b) => b <= 5 && hasListings(s, mode, b));
     const href = listingsUrl(s, mode, beds);
     const what = beds.length ? `${beds.map((b) => (b === 5 ? '5+' : b)).join(', ')} BHK` : n.toLocaleString();
@@ -495,23 +607,88 @@ function sparkline(trend) {
     <span class="fine">Average price per sq ft ${trend[0][0]} to ${trend.at(-1)[0]}: ₹${vals[0].toLocaleString()} to ₹${vals.at(-1).toLocaleString()} (${ch >= 0 ? '+' : ''}${ch.toFixed(0)}%)</span></div>`;
 }
 
-// ---------- phone: one bottom sheet, two tabs (search | society) ----------
+// ---------- phone: one draggable bottom sheet, two tabs (search | society) ----------
+// Three resting heights: peek (just the count), half, full. The sheet follows the finger 1:1, and on release
+// it heads for the snap point nearest to where the flick is going, carrying the finger's speed into a spring.
+let sheetPx = 0;
+const sheetH = () => sheetPx || Math.round(innerHeight * 0.46);
+const SNAPS = () => ({ peek: 132, half: Math.round(innerHeight * 0.46), full: Math.round(innerHeight * 0.86) });
+function setSheet(h) {
+  sheetPx = h;
+  document.documentElement.style.setProperty('--sheet', `${Math.round(h)}px`);
+}
+let springRaf = 0;
+function sheetTo(name, v0 = 0) {
+  if (!mobile) return;
+  const target = typeof name === 'number' ? name : SNAPS()[name];
+  cancelAnimationFrame(springRaf);
+  const done = () => {
+    setSheet(target);
+    document.body.classList.toggle('m-peek', target <= SNAPS().peek);
+    map?.setPadding(padding());
+  };
+  if (calm) { done(); return; }
+  // damping 0.85 after a flick (a touch of give), 1.0 otherwise; response 0.3 s
+  const zeta = Math.abs(v0) > 300 ? 0.85 : 1, w = (2 * Math.PI) / 0.3;
+  let x = sheetH(), v = v0, last = performance.now();
+  const step = (now) => {
+    const dt = Math.min(0.032, (now - last) / 1000); last = now;
+    v += (-w * w * (x - target) - 2 * zeta * w * v) * dt;
+    x += v * dt;
+    setSheet(x);
+    if (Math.abs(x - target) < 0.5 && Math.abs(v) < 8) done(); else springRaf = requestAnimationFrame(step);
+  };
+  springRaf = requestAnimationFrame(step);
+}
+
 function showMobile(tab) {
   document.body.classList.toggle('m-society', tab === 'society');
-  document.body.classList.remove('m-collapsed');
   document.querySelectorAll('#mtabs [data-t]').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
   $('mt-society').disabled = !selected && tab !== 'society';
+  $('mt-society').textContent = selected || tab === 'society' ? 'Society' : 'Tap a building';
+  if (mobile && sheetH() <= SNAPS().peek + 4 && tab === 'society') sheetTo('half');
 }
 
 function buildMobile() {
-  document.querySelectorAll('#mtabs [data-t]').forEach((b) => (b.onclick = () => showMobile(b.dataset.t)));
-  const collapse = () => {
-    const c = document.body.classList.toggle('m-collapsed');
-    $('m-collapse').textContent = c ? '⌃' : '⌄';
-    $('btn-mhide').textContent = c ? 'Show panel' : 'Hide panel';
+  if (!mobile) return;
+  setSheet(SNAPS().half);
+  const head = $('mtabs');
+  let drag = null;
+  head.addEventListener('pointerdown', (e) => {
+    cancelAnimationFrame(springRaf);
+    drag = { y: e.clientY, h: sheetH(), moved: false, hist: [[e.timeStamp, e.clientY]], id: e.pointerId };
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved && Math.abs(dy) < 8) return; // a tap stays a tap
+    if (!drag.moved) { drag.moved = true; head.setPointerCapture(drag.id); }
+    const { peek, full } = SNAPS();
+    let h = drag.h - dy;
+    // soft edges: past the top or bottom, the sheet follows less and less
+    const band = (over) => (over * 160 * 0.55) / (160 + 0.55 * Math.abs(over));
+    if (h > full) h = full + band(h - full); else if (h < peek) h = peek - band(peek - h);
+    setSheet(h);
+    drag.hist.push([e.timeStamp, e.clientY]);
+    if (drag.hist.length > 6) drag.hist.shift();
+  });
+  const end = (e) => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (!d.moved) return;
+    e.preventDefault();
+    const [t0, y0] = d.hist[0], dt = Math.max(1, e.timeStamp - t0);
+    const v = -((e.clientY - y0) / dt) * 1000; // px/s, upward is positive
+    const projected = sheetH() + ((v / 1000) * 0.99) / (1 - 0.99);
+    const s = SNAPS();
+    const name = Object.keys(s).reduce((a, b) => (Math.abs(s[b] - projected) < Math.abs(s[a] - projected) ? b : a));
+    sheetTo(name, v);
+    head.addEventListener('click', (ev) => ev.stopPropagation(), { capture: true, once: true }); // the drag was not a tap on a tab
   };
-  $('m-collapse').onclick = collapse;
-  $('btn-mhide').onclick = collapse;
+  head.addEventListener('pointerup', end);
+  head.addEventListener('pointercancel', end);
+  document.querySelectorAll('#mtabs [data-t]').forEach((b) => (b.onclick = () => showMobile(b.dataset.t)));
+  addEventListener('resize', () => sheetTo(sheetH() > innerHeight * 0.7 ? 'full' : sheetH() < 200 ? 'peek' : 'half'));
 }
 
 // ---------- first visit: point out the 2D / 3D switch ----------
@@ -555,7 +732,7 @@ function buildList() {
     if (map && myList.length) {
       const pts = myList.map((id) => byId.get(id));
       const b = pts.reduce((bb, s) => bb.extend([s.lng, s.lat]), new maplibregl.LngLatBounds([pts[0].lng, pts[0].lat], [pts[0].lng, pts[0].lat]));
-      map.fitBounds(b, { padding: { top: 80, bottom: 80, left: mobile ? 40 : 380, right: mobile ? 40 : 460 }, maxZoom: 15, bearing: 0 });
+      map.fitBounds(b, { padding: 50, maxZoom: 15, bearing: 0, duration: calm ? 0 : 1800 });
     }
   };
   $('btn-share').onclick = async () => {
@@ -608,8 +785,8 @@ function setBase(mode) {
 function buildControls() {
   $('ctl-in').onclick = () => map?.zoomIn();
   $('ctl-out').onclick = () => map?.zoomOut();
-  $('ctl-tilt').onclick = () => { is3d = !is3d; $('ctl-tilt').textContent = is3d ? '2D' : '3D'; map?.easeTo({ pitch: is3d ? 50 : 0, bearing: 0, duration: 800 }); };
-  $('ctl-home').onclick = () => { closeCard(); map?.flyTo({ ...OVERVIEW, pitch: is3d ? OVERVIEW.pitch : 0, duration: 2000 }); };
+  $('ctl-tilt').onclick = () => { is3d = !is3d; $('ctl-tilt').textContent = is3d ? '2D' : '3D'; map?.easeTo({ pitch: is3d ? 50 : 0, bearing: 0, duration: calm ? 0 : 800 }); };
+  $('ctl-home').onclick = () => { closeCard(); go({ ...OVERVIEW, pitch: is3d ? OVERVIEW.pitch : 0, duration: 2000 }); };
   $('ctl-locate').onclick = () => {
     if (!navigator.geolocation) return;
     $('ctl-locate').classList.add('busy');
@@ -618,7 +795,7 @@ function buildControls() {
       const at = [p.coords.longitude, p.coords.latitude];
       if (!youMarker) { const el = document.createElement('div'); el.className = 'you'; youMarker = new maplibregl.Marker({ element: el }); }
       youMarker.setLngLat(at).addTo(map);
-      map.flyTo({ center: at, zoom: 15, bearing: 0, duration: 2000 });
+      go({ center: at, zoom: 15, bearing: 0, duration: 2000 });
     }, () => { $('ctl-locate').classList.remove('busy'); toast('Could not get your location.'); }, { enableHighAccuracy: true, timeout: 10000 });
   };
   $('layers-btn').onclick = () => $('layers').classList.toggle('open');
@@ -629,7 +806,7 @@ function buildControls() {
     box.checked = highlights[k];
     box.onchange = () => { highlights[k] = box.checked; store.set('ff-highlights', highlights); if (map) setHighlights(map, highlights); };
   }
-  if (store.get('ff-log', true) === false) toggleLog(false);
+  if (demo && store.get('ff-log', false)) toggleLog(true);
   setBase(baseMode);
 }
 
@@ -638,9 +815,9 @@ function buildOnboarding() {
   const c = data.counts;
   const steps = [
     ['Every society in ' + data.city.name + ', on one map', `${c.on_map.toLocaleString()} housing societies, ${(c.for_sale || 0).toLocaleString()} homes for sale and ${(c.for_rent || 0).toLocaleString()} for rent. Each one has its prices, rents, resident ratings, what is nearby, and links to Google Maps.`],
-    ['Start with what you cannot live without', 'Pick Buy or Rent and your budget. Then set the smallest bedroom you can live with, by both sides or by area in gaj or sq ft. Add amenities and what you want nearby, like a park within 500 m.'],
+    ['Start with what you cannot live without', 'Pick Buy or Rent and your budget. Then set the smallest bedroom you can live with, by area in sq ft. Add amenities and what you want nearby, like a park within 500 m.'],
     ['How to read the map', '<span class="lg match"></span> Verified: every bedroom read from builder plans and passes.<br><span class="lg likely"></span> Likely: the rooms read so far pass.<br><span class="lg probable"></span> Probably fits: plans not read yet, estimated from unit size.<br><span class="lg unknown"></span> Not checked yet: no room data, so neither pass nor fail.'],
-    ['Open a society, keep a list', 'Click any building for prices, bedrooms, ratings and the research behind every number. Star the ones you like, or paste a list of names you already have. Export your results as a CSV any time.'],
+    ['Open a society, keep a list', 'Click any building for prices, bedrooms, ratings and the research behind every number. Star the ones you like, or paste a list of names you already have. Your filters stay in the link, so you can reload or share a search.'],
   ];
   let i = 0;
   const show = () => {
@@ -649,7 +826,7 @@ function buildOnboarding() {
     $('ob-back').hidden = i === 0;
     $('ob-next').textContent = i === steps.length - 1 ? 'Start exploring' : 'Next';
   };
-  const done = () => { $('onboard').hidden = true; store.set('ff-onboarded', true); };
+  const done = () => { $('onboard').hidden = true; store.set('ff-onboarded', true); if (pendingIntro) { pendingIntro = false; intro(); } };
   $('ob-next').onclick = () => (i === steps.length - 1 ? done() : (i++, show()));
   $('ob-back').onclick = () => { i = Math.max(0, i - 1); show(); };
   $('ob-skip').onclick = done;
@@ -709,17 +886,17 @@ function buildSearch() {
   });
 }
 
-function setQuery(q) {
+function setQuery(q, { fit = true } = {}) {
   crit.q = q;
   $('q-pill').hidden = !q;
   $('q-pill').innerHTML = q ? `Showing names matching "<b>${esc(q)}</b>" <button class="iconbtn" aria-label="Clear">×</button>` : '';
   $('q-pill').querySelector('button')?.addEventListener('click', () => { $('q').value = ''; setQuery(''); });
   applyFilters();
-  if (q && map) {
+  if (q && map && fit) {
     const hits = data.societies.filter((s) => states.get(s.id) !== 'no');
     if (hits.length) {
       const b = hits.reduce((bb, s) => bb.extend([s.lng, s.lat]), new maplibregl.LngLatBounds([hits[0].lng, hits[0].lat], [hits[0].lng, hits[0].lat]));
-      map.fitBounds(b, { padding: { top: 80, bottom: 80, left: mobile ? 40 : 380, right: mobile ? 40 : 460 }, maxZoom: 15, bearing: 0 });
+      map.fitBounds(b, { padding: 50, maxZoom: 15, bearing: 0, duration: calm ? 0 : 1800 });
     }
   }
 }
@@ -745,7 +922,7 @@ function tour() {
   let i = 0;
   const next = () => {
     if (!touring) return;
-    if (i >= list.length) { stopTour(); closeCard(); map.flyTo({ ...OVERVIEW, pitch: is3d ? OVERVIEW.pitch : 0, duration: 4000 }); return; }
+    if (i >= list.length) { stopTour(); closeCard(); go({ ...OVERVIEW, pitch: is3d ? OVERVIEW.pitch : 0, duration: 4000 }); return; }
     openSociety(list[i++].id);
     tourTimer = setTimeout(next, 7000);
   };

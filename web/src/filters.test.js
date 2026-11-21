@@ -159,3 +159,42 @@ describe('listings link', () => {
     expect(listingsUrl({ id: 'osm-1', url: 'https://www.openstreetmap.org/way/1' })).toBeNull();
   });
 });
+
+import { BUY_STEPS, RENT_STEPS, activeFilters, critFromParams, critToParams, scoreOf, stepIndex, typicalResidents } from './filters.js';
+
+describe('score', () => {
+  const rated = { score: 9.1, score_parts: { residents: 9.6, nearby: 8, amenities: 10 } };
+  const unrated = { score: 10, score_parts: { nearby: 10, amenities: 10 } };
+  it('keeps a rated score as it is', () => expect(scoreOf(rated, 7)).toEqual({ value: 9.1, partial: false }));
+  it('never gives 10/10 without resident ratings', () => {
+    const s = scoreOf(unrated, 7.6);
+    expect(s.partial).toBe(true);
+    expect(s.value).toBe(8.8);
+  });
+  it('uses the median rating as typical', () => expect(typicalResidents([rated, unrated, { score_parts: { residents: 6 } }, { score_parts: { residents: 8 } }])).toBe(8));
+});
+
+describe('budget steps', () => {
+  it('has fine steps under 1 Cr and ends at 20 Cr', () => {
+    expect(BUY_STEPS[1]).toBe(5e5);
+    expect(BUY_STEPS.at(-1)).toBe(2e8);
+    expect(BUY_STEPS.filter((v) => v >= 5e6 && v <= 3e7).length).toBeGreaterThan(BUY_STEPS.length * 0.4);
+    expect(RENT_STEPS.at(-1)).toBe(5e5);
+  });
+  it('maps a value back to its step, and no limit to the last', () => {
+    expect(BUY_STEPS[stepIndex(BUY_STEPS, 1.2e7)]).toBe(1.2e7);
+    expect(stepIndex(BUY_STEPS, null)).toBe(BUY_STEPS.length - 1);
+  });
+});
+
+describe('filters in the URL', () => {
+  it('round-trips a search', () => {
+    const c = crit({ bhk: [2, 3], mode: 'rent', maxRent: 45000, near: ['metro'], amenities: ['gym'], kinds: [], unknown: true, q: 'lodha' });
+    const back = critFromParams(new URLSearchParams(critToParams(c).toString()));
+    for (const k of ['bhk', 'mode', 'maxRent', 'near', 'amenities', 'kinds', 'unknown', 'q']) expect(back[k]).toEqual(c[k]);
+  });
+  it('leaves defaults out of the URL', () => {
+    expect(critToParams(crit()).toString()).toBe('');
+    expect(activeFilters(crit({ bhk: [2], ready: true }))).toBe(2);
+  });
+});

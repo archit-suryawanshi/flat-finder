@@ -5,7 +5,7 @@ const COLORS = { match: '#ffd9a0', likely: '#c99a5c', probable: '#9a8463', unkno
 export const OVERVIEW = { center: [77.065, 28.425], zoom: 12.4, pitch: 50, bearing: 0 };
 
 const stateColor = (fallback) => ['case',
-  ['boolean', ['feature-state', 'sel'], false], '#ffffff',
+  ['any', ['boolean', ['feature-state', 'sel'], false], ['boolean', ['feature-state', 'hov'], false]], '#ffffff',
   ['match', ['feature-state', 'st'], 'match', COLORS.match, 'likely', COLORS.likely, 'probable', COLORS.probable, 'unknown', COLORS.unknown, 'no', COLORS.no, fallback]];
 
 export function createMap(container, { mobile }) {
@@ -74,8 +74,9 @@ export function addSocietyLayers(map, shapes, points) {
       'text-opacity': ['match', ['feature-state', 'st'], 'match', 1, 'likely', 0.85, 'probable', 0.85, 'unknown', 0.35, 'no', 0, 0.7] } });
 }
 
-// Pulse the glow of matches. Cheap: one paint property on ~2,700 circles.
+// Pulse the glow of matches. Cheap: one paint property on ~2,700 circles. Off when people ask for less motion.
 export function startPulse(map) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   setInterval(() => {
     if (!map.getLayer('glow')) return;
     const k = 1 + 0.35 * Math.sin(performance.now() / 420);
@@ -93,6 +94,13 @@ export function setStates(map, entries) {
 export function setSelected(map, sid, prev) {
   if (prev) for (const src of ['shapes', 'pts']) map.setFeatureState({ source: src, id: prev }, { sel: false });
   if (sid) for (const src of ['shapes', 'pts']) map.setFeatureState({ source: src, id: sid }, { sel: true });
+}
+
+// A society under the pointer, in the list or on the map, lights up in the selection colour.
+export function setHover(map, sid, prev) {
+  if (!map?.getSource?.('shapes')) return;
+  if (prev && prev !== sid) for (const src of ['shapes', 'pts']) map.setFeatureState({ source: src, id: prev }, { hov: false });
+  if (sid) for (const src of ['shapes', 'pts']) map.setFeatureState({ source: src, id: sid }, { hov: true });
 }
 
 // ---------- Streets view: a dark street map with road and area names, from OpenFreeMap vector tiles ----------
@@ -159,7 +167,7 @@ const DARK = {
   'lbl-metro': { 'text-color': '#8fb4ff', 'text-halo-color': 'rgba(0,0,0,.85)' },
 };
 
-const colorBy = (c) => ['case', ['boolean', ['feature-state', 'sel'], false], c.sel,
+const colorBy = (c) => ['case', ['any', ['boolean', ['feature-state', 'sel'], false], ['boolean', ['feature-state', 'hov'], false]], c.sel,
   ['match', ['feature-state', 'st'], 'match', c.match, 'likely', c.likely, 'probable', c.probable, 'unknown', c.unknown, 'no', c.no, c.match]];
 
 export const BASE_MODES = ['night', 'streets', 'light'];

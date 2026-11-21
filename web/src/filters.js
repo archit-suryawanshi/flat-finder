@@ -188,3 +188,76 @@ export function listingsUrl(s, mode = 'buy', bhk = []) {
   const q = `${beds.length ? `bedroom=${beds.join(',')}&` : ''}proptype=Multistorey-Apartment,Builder-Floor-Apartment,Penthouse,Studio-Apartment,Residential-House,Villa&projectSociety=${id[1]}&cityName=${city}`;
   return `https://www.magicbricks.com/property-for-${mode === 'rent' ? 'rent' : 'sale'}/residential-real-estate?${q}`;
 }
+
+// ---------- Flat Finder score, honest about missing parts ----------
+// The stored score re-weights whatever parts exist, so a society with no resident ratings can reach 10/10 on
+// nearby and amenities alone. For display and ranking, a missing rating counts as the city's typical one instead.
+export function typicalResidents(societies) {
+  const v = societies.map((s) => s.score_parts?.residents).filter((x) => x != null).sort((a, b) => a - b);
+  return v.length ? v[Math.floor(v.length / 2)] : 7;
+}
+
+export function scoreOf(s, typical = 7) {
+  if (s.score == null) return null;
+  const p = s.score_parts || {};
+  if (p.residents != null) return { value: s.score, partial: false };
+  const value = Math.round((typical * 0.5 + (p.nearby || 0) * 0.3 + (p.amenities || 0) * 0.2) * 10) / 10;
+  return { value, partial: true };
+}
+
+// ---------- budget slider steps: fine where most homes are, coarse at the top ----------
+const steps = (...spans) => {
+  const out = [0];
+  for (const [to, by] of spans) while (out.at(-1) < to) out.push(Math.round((out.at(-1) + by) * 1e6) / 1e6);
+  return out;
+};
+// buy in rupees: 5 L steps to 1 Cr, 10 L to 3 Cr, 25 L to 5 Cr, 50 L to 10 Cr, 1 Cr to 20 Cr
+export const BUY_STEPS = steps([1e7, 5e5], [3e7, 1e6], [5e7, 2.5e6], [1e8, 5e6], [2e8, 1e7]);
+// rent in rupees a month: 2.5k to 50k, 5k to 1 L, 10k to 2 L, 25k to 5 L
+export const RENT_STEPS = steps([5e4, 2500], [1e5, 5000], [2e5, 10000], [5e5, 25000]);
+export const stepIndex = (list, v) => {
+  if (v == null) return list.length - 1;
+  let i = 0;
+  while (i < list.length - 1 && list[i + 1] <= v) i++;
+  return i;
+};
+
+// ---------- filters in the address bar, so a search survives a reload and can be shared ----------
+const LISTS = { kinds: 't', bhk: 'bhk', amenities: 'am', near: 'nr' };
+const NUMS = { minSqft: 'sq', maxSqft: 'sqmax', minPrice: 'p', maxPrice: 'pmax', minRent: 'r', maxRent: 'rmax', roomArea: 'room' };
+
+export function critToParams(c, q = new URLSearchParams()) {
+  const d = DEFAULT_CRITERIA;
+  for (const [k, key] of Object.entries(LISTS)) {
+    const same = c[k].length === d[k].length && c[k].every((v) => d[k].includes(v));
+    same ? q.delete(key) : q.set(key, c[k].join(',') || '-');
+  }
+  for (const [k, key] of Object.entries(NUMS)) (c[k] && c[k] !== d[k] ? q.set(key, c[k]) : q.delete(key));
+  c.mode !== d.mode ? q.set('mode', c.mode) : q.delete('mode');
+  c.ready ? q.set('ready', 1) : q.delete('ready');
+  c.estimates === false ? q.set('est', 0) : q.delete('est');
+  c.unknown ? q.set('unk', 1) : q.delete('unk');
+  c.q ? q.set('q', c.q) : q.delete('q');
+  return q;
+}
+
+export function critFromParams(q) {
+  const c = structuredClone(DEFAULT_CRITERIA);
+  for (const [k, key] of Object.entries(LISTS)) {
+    if (!q.has(key)) continue;
+    const raw = q.get(key) === '-' ? [] : q.get(key).split(',').filter(Boolean);
+    c[k] = k === 'bhk' ? raw.map(Number).filter((n) => n >= 1 && n <= 6) : raw;
+  }
+  for (const [k, key] of Object.entries(NUMS)) if (q.has(key) && +q.get(key) > 0) c[k] = +q.get(key);
+  if (q.get('mode') === 'rent') c.mode = 'rent';
+  c.ready = q.get('ready') === '1';
+  if (q.get('est') === '0') c.estimates = false;
+  c.unknown = q.get('unk') === '1';
+  c.q = q.get('q') || '';
+  return c;
+}
+
+// How many filters differ from the defaults (for the "Reset" link).
+export function activeFilters(c) {
+  return critToParams(c).size - (c.q ? 1 : 0);
+}
