@@ -158,13 +158,31 @@ def main(argv):
     if not mb and place["country"] == "in" and "--osm-only" not in flags:
         print("Checking Magicbricks...", flush=True)
         mb, total = magicbricks_slug(query, place["name"])
+    sitemap = cfg.get("magicbricks_sitemap")
+    if not mb and not sitemap and place["country"] == "in" and "--osm-only" not in flags:
+        # no list page (Magicbricks has them for ~15 cities): look for the city's projects in its project sitemaps
+        import mb_crawl
+        words = sorted({slug(query.split(",")[0]), slug(place["name"])})
+        print(f"Checking Magicbricks project sitemaps for {words}...", flush=True)
+        hits = mb_crawl.sitemap_matches(words)
+        # project names elsewhere contain the word too ("Kalyan Tower" in Ahmedabad): keep the files where the city lives
+        top = max((len(v) for v in hits.values()), default=0)
+        hits = {k: v for k, v in hits.items() if len(v) >= 0.25 * top or "otherCities" in k}
+        n = sum(len(v) for v in hits.values())
+        print(f"  {n:,} projects in " + ", ".join(f"{k} ({len(v)})" for k, v in hits.items()), flush=True)
+        if n >= 20:
+            sitemap, total = {"match": words, "files": sorted(hits)}, n
     if "--osm-only" in flags:
-        mb = None
-    cfg["source"] = "magicbricks" if mb else "osm"
+        mb, sitemap = None, None
+    cfg["source"] = "magicbricks" if mb or sitemap else "osm"
     if mb:
         cfg["magicbricks"] = mb
     else:
         cfg.pop("magicbricks", None)
+    if sitemap:
+        cfg["magicbricks_sitemap"] = sitemap
+    else:
+        cfg.pop("magicbricks_sitemap", None)
     cfg.setdefault("bbox", place["bbox"])
     cfg["center"] = cfg.get("center") or [round(place["lng"], 4), round(place["lat"], 4)]
     cfg["zoom"] = cfg.get("zoom") or zoom_for(cfg["bbox"])
@@ -172,11 +190,11 @@ def main(argv):
     save_city(city_id, cfg)
     print(f"\nCity id: {city_id}  source: {cfg['source']}", flush=True)
 
-    steps = 4 if mb else 2
+    steps = 4 if mb or sitemap else 2
     step = iter(range(1, 5))
-    if mb:
-        print(f"Stage {next(step)}/{steps}: Magicbricks list pages", flush=True)
-        crawl = ["mb_crawl.py", "list", city_id] + (["--max", str(cap)] if cap else [])
+    if mb or sitemap:
+        print(f"Stage {next(step)}/{steps}: Magicbricks " + ("list pages" if mb else "project sitemaps"), flush=True)
+        crawl = ["mb_crawl.py", "list" if mb else "sitemap", city_id] + (["--max", str(cap)] if cap else [])
         if cap and total and total > cap:
             print(f"  crawling the first {cap:,} of {total:,} projects (use --all for every one)", flush=True)
         run(*crawl)
@@ -190,7 +208,7 @@ def main(argv):
             save_city(city_id, cfg)
     print(f"Stage {next(step)}/{steps}: OpenStreetMap outlines and nearby places (usually 2 to 10 min)", flush=True)
     run("osm_fetch.py", city_id)
-    if not mb:
+    if not (mb or sitemap):
         run("osm_fetch.py", city_id, "complexes")
     print(f"Stage {next(step)}/{steps}: building the map files", flush=True)
     run("build_city.py", city_id)

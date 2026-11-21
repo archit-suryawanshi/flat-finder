@@ -105,6 +105,10 @@ def parse_project_page(html):
         "amenities": amen,
         "config_text": det.get("prjConfig"),
         "configs": parse_configs(state),
+        # what list cards normally give; used when the project came from a sitemap instead of a list page
+        "page_card": {"name": (info.get("projectName") or "").strip() or None, "developer": info.get("devName"),
+                      "locality": info.get("lmtDName") or info.get("localityName"),
+                      "price_min": _num(info.get("minSalePrice")), "price_max": _num(info.get("maxSalePrice"))},
         **parse_extras(html),
     }
 

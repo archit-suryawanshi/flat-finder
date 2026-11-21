@@ -1,6 +1,8 @@
 """Polite, cached, resumable Magicbricks crawler.
 
 usage: python mb_crawl.py list <city> [--max N]  # list pages -> out/<city>/mb_index.json (first N projects, default all)
+       python mb_crawl.py sitemap <city> [--max N]  # same, from Magicbricks' project sitemaps, for cities without a
+                                                    # list page (cities.json: "magicbricks_sitemap": {"files", "match"})
        python mb_crawl.py projects <city>         # every project page -> out/<city>/mb_projects.json
 <city> is a key in data/cities.json (default: the first one).
 """
@@ -22,7 +24,7 @@ OUT = ROOT / "out"
 CITIES = json.loads((ROOT.parent / "data" / "cities.json").read_text())
 CITY = next((a for a in sys.argv[1:] if a in CITIES), next(iter(CITIES)))
 CFG = CITIES[CITY]
-LIST_URL = "https://www.magicbricks.com/residential-projects-in-" + CFG["magicbricks"] + "-nprid/page-{}"
+LIST_URL = "https://www.magicbricks.com/residential-projects-in-" + CFG.get("magicbricks", CITY) + "-nprid/page-{}"
 OUT = OUT / CITY
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 DELAY = 1.0
@@ -73,6 +75,68 @@ def crawl_list():
     print("total reported", total, "collected", len(projects), flush=True)
 
 
+SITEMAP_INDEX = "https://www.magicbricks.com/sitemap_index.xml"
+
+
+def fetch_bytes(url):
+    """Cached raw download (sitemaps are gzip files)."""
+    CACHE.mkdir(parents=True, exist_ok=True)
+    f = CACHE / (hashlib.sha1(url.encode()).hexdigest() + ".bin")
+    if f.exists() and f.stat().st_size > 500:
+        return f.read_bytes()
+    raw = net.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=60).read()
+    f.write_bytes(raw)
+    time.sleep(DELAY)
+    return raw
+
+
+def project_sitemaps():
+    """{file name: [project page urls]} for every per-city project sitemap Magicbricks publishes."""
+    import re
+    idx = fetch_bytes(SITEMAP_INDEX).decode("utf-8", "ignore")
+    files = sorted(set(re.findall(r"(pdp_[A-Z][A-Za-z_]*?\d*\.xml\.gz|pdp_otherCities\.xml\.gz)", idx)))
+    out = {}
+    for name in files:
+        raw = fetch_bytes("https://www.magicbricks.com/" + name)
+        try:
+            raw = gzip.decompress(raw)
+        except OSError:
+            pass
+        out[name] = re.findall(r"<loc>([^<]+pdpid-[0-9a-f]+)</loc>", raw.decode("utf-8", "ignore"))
+    return out
+
+
+def sitemap_matches(words, files=None):
+    """Project urls whose slug names one of `words` as a whole part (e.g. "kalyan" in ...-kalyan-west-beyond-thane-pdpid-...)."""
+    hits = {}
+    for name, urls in project_sitemaps().items():
+        if files and name not in files:
+            continue
+        for u in urls:
+            slug = "-" + u.rsplit("/", 1)[-1].split("-pdpid-")[0] + "-"
+            # the mixed "other cities" file: only urls that end in the city name (<project>-<locality>-<city>)
+            ok = slug.endswith(tuple(f"-{w}-" for w in words)) if "otherCities" in name else any(f"-{w}-" in slug for w in words)
+            if ok:
+                hits.setdefault(name, []).append(u)
+    return hits
+
+
+def crawl_sitemap():
+    sm = CFG["magicbricks_sitemap"]
+    urls = [u for us in sitemap_matches(sm["match"], sm.get("files")).values() for u in us]
+    urls = urls[: max_projects() or len(urls)]
+    index = []
+    for u in urls:
+        try:
+            psmid = bytes.fromhex(u.rsplit("-pdpid-", 1)[1]).decode().removeprefix("MB")
+        except ValueError:
+            continue
+        index.append({"mb_id": psmid, "name": None, "url": u})
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "mb_index.json").write_text(json.dumps(index, indent=0))
+    print(f"sitemap: {len(index)} projects matching {sm['match']}", flush=True)
+
+
 def crawl_projects():
     index = json.loads((OUT / "mb_index.json").read_text())
     from concurrent.futures import ThreadPoolExecutor
@@ -84,7 +148,12 @@ def crawl_projects():
         except Exception as e:
             print("  parse failed", p["url"], e, flush=True)
             detail = {}
-        return {**p, **{k: v for k, v in detail.items() if v not in (None, [], "")}}
+        card = detail.pop("page_card", None) or {}
+        merged = {**p, **{k: v for k, v in detail.items() if v not in (None, [], "")}}
+        for k, v in card.items():  # sitemap projects have no list card: take these from the page
+            if not merged.get(k) and v:
+                merged[k] = v
+        return merged
 
     out = []
     t0 = time.time()
@@ -98,4 +167,4 @@ def crawl_projects():
 
 
 if __name__ == "__main__":
-    {"list": crawl_list, "projects": crawl_projects}[sys.argv[1]]()
+    {"list": crawl_list, "sitemap": crawl_sitemap, "projects": crawl_projects}[sys.argv[1]]()
