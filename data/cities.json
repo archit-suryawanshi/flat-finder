@@ -92,5 +92,22 @@
    18.5214
   ],
   "zoom": 11.7
+ },
+ "thane": {
+  "name": "Thane",
+  "country": "in",
+  "source": "magicbricks",
+  "magicbricks": "thane",
+  "bbox": [
+   19.0844,
+   72.84,
+   19.3313,
+   73.1144
+  ],
+  "center": [
+   72.9772,
+   19.2079
+  ],
+  "zoom": 12.1
  }
 }
