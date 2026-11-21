@@ -47,5 +47,30 @@
    19.2079
   ],
   "zoom": 12.1
+ },
+ "kalyan": {
+  "name": "Kalyan",
+  "country": "in",
+  "source": "magicbricks",
+  "magicbricks_sitemap": {
+   "match": [
+    "kalyan"
+   ],
+   "files": [
+    "pdp_Beyond_Thane1.xml.gz",
+    "pdp_otherCities.xml.gz"
+   ]
+  },
+  "bbox": [
+   19.0861,
+   72.9461,
+   19.3842,
+   73.3071
+  ],
+  "center": [
+   73.1266,
+   19.2351
+  ],
+  "zoom": 11.8
  }
 }
