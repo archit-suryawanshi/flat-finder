@@ -198,3 +198,26 @@ describe('filters in the URL', () => {
     expect(activeFilters(crit({ bhk: [2], ready: true }))).toBe(2);
   });
 });
+
+import { parseINR } from './filters.js';
+
+describe('typed budget', () => {
+  it('reads crores, lakhs and thousands', () => {
+    expect(parseINR('1.2 Cr')).toBe(1.2e7);
+    expect(parseINR('85 L')).toBe(8.5e6);
+    expect(parseINR('85 lakh')).toBe(8.5e6);
+    expect(parseINR('45k', 'rent')).toBe(45000);
+    expect(parseINR('₹1,20,00,000')).toBe(1.2e7);
+    expect(parseINR('60,000 /mo', 'rent')).toBe(60000);
+  });
+  it('guesses the unit of a bare number from buy or rent', () => {
+    expect(parseINR('1.5')).toBe(1.5e7);
+    expect(parseINR('90')).toBe(9e6);
+    expect(parseINR('35', 'rent')).toBe(35000);
+  });
+  it('treats empty as no limit and nonsense as not understood', () => {
+    expect(parseINR('')).toBeNull();
+    expect(parseINR('Any')).toBeNull();
+    expect(parseINR('cheap')).toBeUndefined();
+  });
+});

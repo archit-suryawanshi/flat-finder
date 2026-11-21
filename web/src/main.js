@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl';
 import { addBaseLayers, addSocietyLayers, BASE_MODES, createMap, OVERVIEW, setBaseMode, setHighlights, setHover, setSelected, setStates, startPulse } from './map.js';
 import { searchSocieties } from './search.js';
 import { createFeed } from './feed.js';
-import { AMENITY_KEYS, BUY_STEPS, DEFAULT_CRITERIA, NEAR, RANK, RENT_STEPS, activeFilters, critFromParams, critToParams, feetLabel, formatINR, hasAmenity, listingsUrl, matchSociety, matchUnit, priceFor, roomPasses, scoreOf, stepIndex, typicalResidents } from './filters.js';
+import { AMENITY_KEYS, BUY_STEPS, DEFAULT_CRITERIA, NEAR, RANK, RENT_STEPS, activeFilters, critFromParams, critToParams, feetLabel, formatINR, hasAmenity, listingsUrl, matchSociety, matchUnit, priceFor, parseINR, roomPasses, scoreOf, stepIndex, typicalResidents } from './filters.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -263,6 +263,12 @@ function buildFilters() {
     $('v-size').textContent = range(crit.minSqft, crit.maxSqft, (v) => `${v.toLocaleString()} sq ft`);
     const rent = crit.mode === 'rent';
     $('v-price').textContent = range(rent ? crit.minRent : crit.minPrice, rent ? crit.maxRent : crit.maxPrice, (v) => formatINR(v) + (rent ? '/mo' : ''));
+    // the typed boxes mirror the slider, except the one being typed in
+    const show = (v) => (v ? formatINR(v).replace('₹', '') : '');
+    if (document.activeElement !== $('p-min')) $('p-min').value = show(rent ? crit.minRent : crit.minPrice);
+    if (document.activeElement !== $('p-max')) $('p-max').value = show(rent ? crit.maxRent : crit.maxPrice);
+    $('p-min').placeholder = rent ? 'Min, e.g. 25k' : 'Min, e.g. 80 L';
+    $('p-max').placeholder = rent ? 'Max, e.g. 60k' : 'Max, e.g. 1.5 Cr';
     $('l-price').textContent = rent ? 'Monthly rent' : 'Budget';
     const g = +$('f-area-range').value;
     $('v-area').textContent = areaUnit === 'gaj' ? `at least ${g.toFixed(2).replace(/\.?0+$/, '')} gaj (${Math.round(g * 9)} sq ft)` : `at least ${Math.round(g * 9)} sq ft (${g.toFixed(1)} gaj)`;
@@ -275,6 +281,23 @@ function buildFilters() {
   $('f-est').onchange = () => { crit.estimates = $('f-est').checked; applyFilters(); };
   $('amen-q').oninput = amenList;
   $('f-ready').onchange = () => { crit.ready = $('f-ready').checked; applyFilters(); };
+  // exact budgets: type "1.2 Cr", "85 L" or "45k"; the slider snaps to the nearest step, the filter keeps the exact amount
+  const typed = (box) => {
+    const v = parseINR(box.value, crit.mode);
+    box.classList.toggle('bad', v === undefined);
+    if (v === undefined) { toast(crit.mode === 'rent' ? 'Try an amount like 45k or 1.2 L.' : 'Try an amount like 85 L or 1.2 Cr.'); return; }
+    const rent = crit.mode === 'rent', lo = rent ? 'minRent' : 'minPrice', hi = rent ? 'maxRent' : 'maxPrice';
+    crit[box.id === 'p-min' ? lo : hi] = v;
+    if (crit[lo] && crit[hi] && crit[lo] > crit[hi]) [crit[lo], crit[hi]] = [crit[hi], crit[lo]];
+    redrawFilters();
+    applyFilters();
+  };
+  for (const box of [$('p-min'), $('p-max')]) {
+    box.onchange = () => typed(box);
+    box.onkeydown = (e) => { if (e.key === 'Enter') box.blur(); else if (e.key === 'Escape') { box.classList.remove('bad'); labels(); box.blur(); } };
+    box.oninput = () => box.classList.remove('bad');
+    box.onblur = () => setTimeout(() => { if (!box.classList.contains('bad')) labels(); }); // tidy "1.23 cr" into "1.23 Cr" once focus has left
+  }
   $('f-sort').value = sortBy;
   $('f-sort').onchange = () => { sortBy = $('f-sort').value; renderResults(); };
   $('f-onscreen').onchange = () => { onScreen = $('f-onscreen').checked; renderResults(); };

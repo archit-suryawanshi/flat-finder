@@ -261,3 +261,17 @@ export function critFromParams(q) {
 export function activeFilters(c) {
   return critToParams(c).size - (c.q ? 1 : 0);
 }
+
+// A budget typed in Indian style: "1.2 Cr", "85 L", "85 lakh", "45k", "₹1,20,00,000". Bare small numbers mean
+// crores (under 50) or lakhs when buying, thousands when renting. "" or "any" is no limit (null); undefined = not understood.
+export function parseINR(text, mode = 'buy') {
+  const t = String(text ?? '').toLowerCase().replace(/rs\.?|inr|₹|,|\s|\/mo(nth)?|per month|a month/g, '');
+  if (!t || /^(any|none|nolimit|-)$/.test(t)) return null;
+  const m = /^(\d+(?:\.\d+)?)(cr|crs|crore|crores|l|lac|lacs|lakh|lakhs|k|thousand)?$/.exec(t);
+  if (!m) return undefined;
+  const n = +m[1], u = m[2] || '';
+  if (u) return Math.round(n * (u.startsWith('c') ? 1e7 : u.startsWith('l') ? 1e5 : 1e3));
+  if (n >= 1000) return Math.round(n);
+  if (mode === 'rent') return Math.round(n * 1e3);
+  return Math.round(n * (n < 50 ? 1e7 : 1e5));
+}
