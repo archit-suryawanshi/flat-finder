@@ -78,7 +78,7 @@ def zoom_for(bbox):
 
 def magicbricks_slug(*names):
     """The Magicbricks city name whose project list has results, or None (Magicbricks lists about 15 Indian cities)."""
-    tried = []
+    tried, blocked = [], []
     for n in names:
         s = slug(n)
         for cand in (MB_ALIASES.get(s), s):
@@ -90,15 +90,29 @@ def magicbricks_slug(*names):
                 html = net.urlopen(urllib.request.Request(url, headers={"User-Agent": UA_BROWSER}), timeout=40).read().decode("utf-8", "ignore")
             except urllib.error.HTTPError as e:
                 print(f"  magicbricks: {cand} -> HTTP {e.code}", flush=True)
+                if e.code == 404:
+                    continue
+                blocked.append(f"HTTP {e.code}")
                 continue
-            except Exception as e:  # blocked or offline: fall back to OpenStreetMap
+            except Exception as e:
                 print(f"  magicbricks: {cand} -> {e}", flush=True)
+                blocked.append(str(e))
                 continue
             total = mb_parse.parse_total(html) or 0
             print(f"  magicbricks: {cand} -> {total:,} projects", flush=True)
             if total > 0:
                 return cand, total
+    if blocked:  # never quietly build a city without prices because Magicbricks refused this machine
+        raise SystemExit(f"Magicbricks refused or failed ({', '.join(blocked)}). It blocks some servers, including GitHub's: "
+                         "run add_city.py on your own computer, or pass --osm-only to build from OpenStreetMap alone.")
     return None, 0
+
+
+def save_city(city_id, cfg):
+    """Re-read the file before writing, so runs for other cities going at the same time keep their entries."""
+    cities = json.loads(CITIES_FILE.read_text())
+    cities[city_id] = cfg
+    CITIES_FILE.write_text(json.dumps(cities, indent=1) + "\n")
 
 
 def run(*args):
@@ -155,7 +169,7 @@ def main(argv):
     cfg["center"] = cfg.get("center") or [round(place["lng"], 4), round(place["lat"], 4)]
     cfg["zoom"] = cfg.get("zoom") or zoom_for(cfg["bbox"])
     cities[city_id] = cfg
-    CITIES_FILE.write_text(json.dumps(cities, indent=1) + "\n")
+    save_city(city_id, cfg)
     print(f"\nCity id: {city_id}  source: {cfg['source']}", flush=True)
 
     steps = 4 if mb else 2
@@ -173,7 +187,7 @@ def main(argv):
             s, w, n, e = cfg["bbox"]
             cfg["center"] = [round((w + e) / 2, 4), round((s + n) / 2, 4)]
             cfg["zoom"] = zoom_for(cfg["bbox"])
-            CITIES_FILE.write_text(json.dumps(cities, indent=1) + "\n")
+            save_city(city_id, cfg)
     print(f"Stage {next(step)}/{steps}: OpenStreetMap outlines and nearby places (usually 2 to 10 min)", flush=True)
     run("osm_fetch.py", city_id)
     if not mb:
