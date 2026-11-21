@@ -98,10 +98,14 @@ def flag_outliers(societies):
                 psf[(s.get("locality"),)].append(p["psf"])
                 psf[(None,)].append(p["psf"])
 
+    medians = {}  # one median per peer group: recomputing them per society is quadratic in big cities
+
     def typical(table, loc, *key):
         for where, k in ((loc, (loc, *key)), ("the city", (None, *key))):
             if len(table[k]) >= MIN_PEERS:
-                return statistics.median(table[k]), where
+                if (id(table), k) not in medians:
+                    medians[(id(table), k)] = statistics.median(table[k])
+                return medians[(id(table), k)], where
         return None, None
 
     def backed(s, p, kind, value):

@@ -117,15 +117,16 @@ def match_area(project, area_grid):
 
 def dedupe(projects):
     """Merge listings with the same name tokens less than 400 m apart (phases, duplicates)."""
-    kept = []
+    kept, by_name = [], defaultdict(list)  # bucketed by name tokens, so big cities stay linear
     for p in projects:
-        for q in kept:
-            if tokens(p["name"]) == tokens(q["name"]) and tokens(p["name"]) and \
-                    geo.dist_m((p["lng"], p["lat"]), (q["lng"], q["lat"])) < 400:
+        key = frozenset(tokens(p["name"]))
+        for q in by_name[key] if key else ():
+            if geo.dist_m((p["lng"], p["lat"]), (q["lng"], q["lat"])) < 400:
                 q.setdefault("merged", []).append(p["url"])
                 break
         else:
             kept.append(p)
+            by_name[key].append(p)
     return kept
 
 
