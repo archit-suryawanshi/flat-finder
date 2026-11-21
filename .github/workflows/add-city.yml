@@ -1,4 +1,5 @@
 name: Add a city
+run-name: "Add ${{ inputs.city }}"
 
 # Type a city name, press Run. The workflow finds the city, fetches its housing societies (Magicbricks where it
 # covers the city, OpenStreetMap everywhere else), builds the map data, commits it and redeploys the site.
@@ -25,8 +26,10 @@ permissions:
   pages: write
   id-token: write
 
+# Runs for different cities go in parallel (GitHub keeps only one queued run per group, so a single shared group
+# silently cancelled cities). Two runs for the same city still queue.
 concurrency:
-  group: add-city
+  group: add-city-${{ inputs.city }}
   cancel-in-progress: false
 
 jobs:
@@ -39,6 +42,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Fetch and build ${{ inputs.city }}
+        id: build
         env:
           CITY: ${{ inputs.city }}
           MAX: ${{ inputs.max_projects }}
@@ -47,17 +51,30 @@ jobs:
           args=("$CITY")
           if [ "$MAX" = "0" ]; then args+=(--all); else args+=(--max "$MAX"); fi
           if [ "$OSM_ONLY" = "true" ]; then args+=(--osm-only); fi
-          cd pipeline && python3 -u add_city.py "${args[@]}" | tee ../add_city.log
+          cd pipeline && python3 -u add_city.py "${args[@]}"
       - name: Commit the new city
         env:
           CITY: ${{ inputs.city }}
+          ID: ${{ steps.build.outputs.city_id }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git add data/cities.json web/public/data pipeline/out
-          git commit -m "Add city: $CITY" || { echo "nothing new to commit"; exit 0; }
-          git pull --rebase origin main
-          git push origin HEAD:main
+          python3 -c "import json,os; json.dump(json.load(open('data/cities.json'))[os.environ['ID']], open(os.environ['RUNNER_TEMP'] + '/entry.json', 'w'))"
+          # the shared city lists are rebuilt on top of the newest main; only this city's own files are carried over
+          git checkout -- data/cities.json web/public/data/cities.json
+          git add -A web/public/data pipeline/out/"$ID"
+          git stash
+          for attempt in 1 2 3 4 5 6; do
+            git fetch -q origin main && git reset -q --hard origin/main
+            # same city added again: this run's files win
+            git stash apply -q || { git reset -q --hard origin/main && git checkout stash@{0} -- web/public/data pipeline/out/"$ID"; }
+            (cd pipeline && python3 register_city.py "$ID" "$RUNNER_TEMP/entry.json")
+            git add -A data/cities.json web/public/data pipeline/out/"$ID"
+            git commit -q -m "Add city: $CITY" || { echo "nothing new to commit"; exit 0; }
+            git push -q origin HEAD:main && exit 0
+            echo "main moved on, retrying"; sleep $((RANDOM % 20 + 5))
+          done
+          exit 1
   deploy:
     needs: build
     uses: ./.github/workflows/deploy.yml

@@ -11,6 +11,7 @@ The result is web/public/data/<id>.json and friends, and the city appears in the
 """
 import json
 import math
+import os
 import pathlib
 import re
 import statistics
@@ -173,6 +174,9 @@ def main(argv):
     if not mb:
         run("osm_fetch.py", city_id, "complexes")
     run("build_city.py", city_id)
+    if os.environ.get("GITHUB_OUTPUT"):  # tell the workflow which id to commit
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"city_id={city_id}\n")
     print(f"\n{cfg['name']} is ready. Open the site with ?city={city_id}, e.g.\n  cd web && npm install && npm run dev  ->  http://localhost:5173/?city={city_id}", flush=True)
     return city_id
 

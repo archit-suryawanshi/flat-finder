@@ -539,10 +539,15 @@ def main(city="gurgaon"):
             f["properties"]["h"] = round(f["properties"]["h"])
     (WEB / f"{city}-shapes.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": shapes}, separators=(",", ":")))
     from collections import Counter
+    write_city_index()
+    print(doc["counts"], Counter(s["shape"] for s in societies), Counter(s["kind"] for s in societies), "features", len(shapes))
+
+
+def write_city_index():
+    """web/public/data/cities.json: every configured city whose data files are built, for the site's city menu."""
     built = sorted(p.stem for p in WEB.glob("*.json") if p.stem != "cities")
     all_cfg = json.loads((ROOT.parent / "data" / "cities.json").read_text())
     (WEB / "cities.json").write_text(json.dumps({c: {"name": all_cfg[c]["name"]} for c in built if c in all_cfg}))
-    print(doc["counts"], Counter(s["shape"] for s in societies), Counter(s["kind"] for s in societies), "features", len(shapes))
 
 
 def write_csv(soc_path, unit_path, societies):
