@@ -98,7 +98,7 @@ Cities live in `data/cities.json`; `add_city.py` writes them there.
 
 Press `/` to search for a society. The Streets button switches to a street map with road and sector names.
 
-Useful links: `?city=gurgaon`, `?map=streets` or `?map=light`, `?preset=divy` loads the example search, `?open=<society id>` opens one society, `?nointro` skips the globe fly-in.
+Useful links: `?city=gurgaon`, `?map=streets` or `?map=light`, `?open=<society id>` opens one society, `?nointro` skips the globe fly-in.
 
 ## Add verified research
 
