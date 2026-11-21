@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CRITERIA, feetLabel, matchSociety, roomPasses } from './filters.js';
+import { DEFAULT_CRITERIA, feetLabel, matchSociety, roomPasses, listingsUrl } from './filters.js';
 
 const ROOM = { a: 11.25, b: 12.25 }; // 11'3" x 12'3"
 const soc = (over = {}) => ({ kind: 'apartment', status: 'Ready To Move', amenities: [], amen_facts: {}, unit_types: [], ...over });
@@ -136,5 +136,26 @@ describe('flagged prices', () => {
     const { priceFor } = await import('./filters.js');
     const s = { prices: { 3: { rent: { median: 960000, n: 1 }, rent_est: { value: 90100, basis: 'yield' }, flags: { rent: 'typo' } } } };
     expect(priceFor(s, 'rent', [3])).toMatchObject({ value: 90100, estimated: true });
+  });
+});
+
+describe('listings link', () => {
+  const url = (slug) => `https://www.magicbricks.com/x-${slug}-pdpid-4d42`;
+  it('opens the society\'s own sale or rent listings with the chosen BHKs', () => {
+    const u = listingsUrl({ id: 's5110291', url: url('hiranandani-estate-thane') }, 'rent', [3, 2]);
+    expect(u).toContain('/property-for-rent/');
+    expect(u).toContain('projectSociety=5110291');
+    expect(u).toContain('cityName=Thane');
+    expect(u).toContain('bedroom=2,3&');
+    expect(listingsUrl({ id: 's1', url: url('pune') })).toContain('/property-for-sale/');
+  });
+  it('uses Magicbricks city names', () => {
+    expect(listingsUrl({ id: 's1', url: url('kharghar-navi-mumbai') })).toContain('cityName=Navi-Mumbai');
+    expect(listingsUrl({ id: 's1', url: url('kalyan-west-beyond-thane') })).toContain('cityName=Thane');
+    expect(listingsUrl({ id: 's1', url: url('khadakpada-kalyan') })).toContain('cityName=Kalyan');
+  });
+  it('5+ asks for 5 and nothing for OpenStreetMap societies', () => {
+    expect(listingsUrl({ id: 's1', url: url('pune') }, 'buy', [5, 6])).toContain('bedroom=5&');
+    expect(listingsUrl({ id: 'osm-1', url: 'https://www.openstreetmap.org/way/1' })).toBeNull();
   });
 });

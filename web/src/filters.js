@@ -175,3 +175,16 @@ export function formatINR(r) {
   if (r >= 1e5) return `₹${(r / 1e5).toFixed(1).replace(/\.0$/, '')} L`;
   return `₹${Math.round(r / 1000)}k`;
 }
+
+// The society's own live listings on Magicbricks (not its project page), for buy or rent and the chosen BHKs.
+// Magicbricks needs its own city name for the project: it is the last part of the project URL, except that
+// "beyond-thane" projects (Kalyan, Dombivli, ...) are filed under Thane. Returns null for non-Magicbricks societies.
+export function listingsUrl(s, mode = 'buy', bhk = []) {
+  const m = /-(navi-mumbai|beyond-thane|[a-z]+)-pdpid-/.exec(s?.url || '');
+  const id = /^s(\d+)$/.exec(s?.id || '');
+  if (!m || !id) return null;
+  const city = m[1] === 'beyond-thane' ? 'Thane' : m[1].split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join('-');
+  const beds = [...new Set(bhk.map((n) => Math.min(n, 5)))].sort();
+  const q = `${beds.length ? `bedroom=${beds.join(',')}&` : ''}proptype=Multistorey-Apartment,Builder-Floor-Apartment,Penthouse,Studio-Apartment,Residential-House,Villa&projectSociety=${id[1]}&cityName=${city}`;
+  return `https://www.magicbricks.com/property-for-${mode === 'rent' ? 'rent' : 'sale'}/residential-real-estate?${q}`;
+}

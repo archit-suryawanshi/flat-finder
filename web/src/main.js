@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl';
 import { addBaseLayers, addSocietyLayers, BASE_MODES, createMap, OVERVIEW, setBaseMode, setHighlights, setSelected, setStates, startPulse } from './map.js';
 import { searchSocieties } from './search.js';
 import { createFeed } from './feed.js';
-import { AMENITY_KEYS, DEFAULT_CRITERIA, NEAR, RANK, feetLabel, formatINR, matchSociety, matchUnit, priceFor, roomPasses } from './filters.js';
+import { AMENITY_KEYS, DEFAULT_CRITERIA, NEAR, RANK, feetLabel, formatINR, listingsUrl, matchSociety, matchUnit, priceFor, roomPasses } from './filters.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -389,16 +389,24 @@ function renderCard(s) {
         + (u.confidence === 'ocr' ? ` <span class="fine">(read from the plan by ${esc(u.checked_by || 'OCR')})</span>` : '')
       : u.est_short ? `<span class="fine">plans not read · estimated at least ${feetLabel(u.est_short)} wide, ~${u.est_area} sq ft</span>` : '<span class="fine">room sizes not read yet</span>';
     const srcLabel = u.confidence === 'ai' || u.confidence === 'ocr' ? 'plan image' : u.confidence === 'primary' ? `plan${u.page ? ' p.' + esc(u.page) : ''}` : `portal${u.page ? ' p.' + esc(u.page) : ''}`;
-    const src = u.source ? `<a href="${esc(u.source)}" target="_blank" rel="noopener">${srcLabel}</a>` : '';
+    const liveBhk = hasListings(s, crit.mode, u.bhk) ? [u.bhk] : [];
+    const live = u.confidence === 'portal' && modeCount(s, crit.mode) && listingsUrl(s, crit.mode, liveBhk);
+    const src = live ? `<a href="${esc(live)}" target="_blank" rel="noopener" title="${liveBhk.length ? u.bhk + ' BHK homes' : 'Homes'} ${crit.mode === 'rent' ? 'for rent' : 'for sale'} in ${esc(s.name)} on Magicbricks">listings</a>`
+      : u.source ? `<a href="${esc(u.source)}" target="_blank" rel="noopener">${srcLabel}</a>` : '';
     const size = u.super_sqft ? `${u.super_sqft.toLocaleString()} super` : u.carpet_sqft ? `${u.carpet_sqft.toLocaleString()} carpet` : u.size_sqft ? `${u.size_sqft.toLocaleString()}` : '';
     const vl = { unknown: 'unread', probable: 'probably' }[v] || v;
     return `<tr><td>${esc(u.label)}<div class="fine">${size ? size + ' sq ft' : ''}</div></td><td>${roomText}</td><td>${v ? `<span class="badge ${v}">${vl}</span>` : ''}</td><td>${src}</td></tr>`;
   }).join('');
-  const cell = (real, est, rent, flag, rangeFlag) => real
-    ? `<b${flag ? ` class="flagged" title="${esc(flag)}"` : ''}>${formatINR(real.median)}${rent ? '/mo' : ''}${flag ? ' ⚠' : ''}</b><div class="fine">${real.n > 1 ? `${formatINR(real.min)} to ${formatINR(real.max)} · ` : ''}${real.n} listing${real.n > 1 ? 's' : ''}${rangeFlag ? ` · <span title="${esc(rangeFlag)}">⚠ odd listings</span>` : ''}</div>${flag ? `<div class="fine flag-note">⚠ Our check: ${esc(flag)}.${est ? ` Our estimate: ~${formatINR(est.value)}${rent ? '/mo' : ''}.` : ''}</div>` : ''}`
+  const listed = (n, rent, bhk) => {
+    const href = listingsUrl(s, rent ? 'rent' : 'buy', [bhk]);
+    const label = `${n} listing${n > 1 ? 's' : ''}`;
+    return href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${label}</a>` : label;
+  };
+  const cell = (real, est, rent, flag, rangeFlag, bhk) => real
+    ? `<b${flag ? ` class="flagged" title="${esc(flag)}"` : ''}>${formatINR(real.median)}${rent ? '/mo' : ''}${flag ? ' ⚠' : ''}</b><div class="fine">${real.n > 1 ? `${formatINR(real.min)} to ${formatINR(real.max)} · ` : ''}${listed(real.n, rent, bhk)}${rangeFlag ? ` · <span title="${esc(rangeFlag)}">⚠ odd listings</span>` : ''}</div>${flag ? `<div class="fine flag-note">⚠ Our check: ${esc(flag)}.${est ? ` Our estimate: ~${formatINR(est.value)}${rent ? '/mo' : ''}.` : ''}</div>` : ''}`
     : est ? `<b class="est" title="${esc(est.basis)}">~${formatINR(est.value)}${rent ? '/mo' : ''}</b><div class="fine">our estimate: ${esc(est.basis)}</div>` : '<span class="fine">no data</span>';
   const priceRows = Object.entries(s.prices || {}).filter(([b]) => !crit.bhk.length || crit.bhk.includes(+b)).map(([b, p]) =>
-    `<tr><td>${b} BHK${p.psf ? `<div class="fine">₹${p.psf.toLocaleString()}/sq ft</div>` : ''}</td><td>${cell(p.buy, p.buy_est, false, p.flags?.buy, p.flags?.buy_range)}</td><td>${cell(p.rent, p.rent_est, true, p.flags?.rent, p.flags?.rent_range)}</td></tr>`).join('');
+    `<tr><td>${b} BHK${p.psf ? `<div class="fine">₹${p.psf.toLocaleString()}/sq ft</div>` : ''}</td><td>${cell(p.buy, p.buy_est, false, p.flags?.buy, p.flags?.buy_range, +b)}</td><td>${cell(p.rent, p.rent_est, true, p.flags?.rent, p.flags?.rent_range, +b)}</td></tr>`).join('');
   const d = details?.[s.id];
   const want = new Set(crit.amenities.flatMap((k) => AMENITY_KEYS[k] || [k.slice(2)]));
   const facts = Object.entries(s.amen_facts || {}).map(([k, f]) => `<span class="hit">${esc(AMEN_LABELS[k] || k)}: ${esc(f.value)} (<a href="${esc(f.source)}" target="_blank" rel="noopener">p.${esc(f.page)}</a>)</span>`).join('');
@@ -444,7 +452,8 @@ function renderCard(s) {
     <div class="links">
       <a class="btnlink" href="${esc(s.gmaps)}" target="_blank" rel="noopener">Google Maps and reviews</a>
       <a class="btnlink" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" rel="noopener">Directions</a>
-      <a href="${esc(s.url)}" target="_blank" rel="noopener">${s.url.includes('openstreetmap.org') ? 'OpenStreetMap' : 'Magicbricks page'}</a>
+      ${listingButtons(s)}
+      <a href="${esc(s.url)}" target="_blank" rel="noopener">${s.url.includes('openstreetmap.org') ? 'OpenStreetMap' : 'Project page'}</a>
       ${s.website ? `<a href="${esc(s.website)}" target="_blank" rel="noopener">Website</a>` : ''}
       ${s.brochure_url ? `<a href="${esc(s.brochure_url)}" target="_blank" rel="noopener">Brochure</a>` : ''}
       ${plans}
@@ -455,6 +464,21 @@ function renderCard(s) {
   $('c-close').onclick = () => { stopTour(); closeCard(); };
   $('c-star').onclick = () => { toggle(myList, s.id); saveList(); renderCard(s); renderResults(); };
   if (!details) loadDetails().then(() => { if (selected === s.id) renderCard(s); });
+}
+
+// Buttons straight to this society's homes on Magicbricks, current mode first, narrowed to the BHKs picked.
+// Magicbricks shows homes *near* the society when it has none of a BHK, so only ask for BHKs it has listed.
+const modeCount = (s, mode) => (mode === 'rent' ? s.rent_count : s.sale_count) || 0;
+const hasListings = (s, mode, bhk) => !!s.prices?.[bhk]?.[mode === 'rent' ? 'rent' : 'buy'];
+function listingButtons(s) {
+  const btn = (mode, n) => {
+    const beds = crit.bhk.filter((b) => b <= 5 && hasListings(s, mode, b));
+    const href = listingsUrl(s, mode, beds);
+    const what = beds.length ? `${beds.map((b) => (b === 5 ? '5+' : b)).join(', ')} BHK` : n.toLocaleString();
+    return href && n ? `<a class="btnlink${mode === crit.mode ? ' main' : ''}" href="${esc(href)}" target="_blank" rel="noopener">${what} for ${mode === 'rent' ? 'rent' : 'sale'}</a>` : '';
+  };
+  const order = crit.mode === 'rent' ? [['rent', s.rent_count], ['buy', s.sale_count]] : [['buy', s.sale_count], ['rent', s.rent_count]];
+  return order.map(([m, n]) => btn(m, n)).join('');
 }
 
 let detailsPromise = null;
