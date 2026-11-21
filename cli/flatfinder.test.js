@@ -9,13 +9,10 @@ it('reads feet and prices', () => {
   expect(parsePrice('90L')).toBe(9e6);
 });
 
-it("a 3-4 BHK search with 11'3 x 12'3 bedrooms and squash finds Araya and Presidia as matches", () => {
-  const city = JSON.parse(readFileSync(new URL('../web/public/data/gurgaon.json', import.meta.url)));
-  const o = parseArgs(['--bhk', '2,3,4', '--min-bedroom', "11'3x12'3", '--min-sqft', '1620', '--amenity', 'squash']);
-  const names = search(city, o).map((r) => r.s.name);
-  expect(names).toContain('Pioneer Araya');
-  expect(names).toContain('Pioneer Presidia');
-  expect(names).not.toContain('Emaar Amaris');
+it('searches a city file: 3 BHK in Pune under 2 Cr finds societies', () => {
+  const city = JSON.parse(readFileSync(new URL('../web/public/data/pune.json', import.meta.url)));
+  const rows = search(city, parseArgs(['--bhk', '3', '--max-price', '2cr']));
+  expect(rows.length).toBeGreaterThan(10);
 });
 
 it('reads monthly rent', () => {

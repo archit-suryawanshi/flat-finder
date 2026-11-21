@@ -2,7 +2,7 @@
 
 usage: python mb_crawl.py list <city> [--max N]  # list pages -> out/<city>/mb_index.json (first N projects, default all)
        python mb_crawl.py projects <city>         # every project page -> out/<city>/mb_projects.json
-<city> is a key in data/cities.json (default gurgaon).
+<city> is a key in data/cities.json (default: the first one).
 """
 import gzip
 import hashlib
@@ -20,7 +20,7 @@ ROOT = pathlib.Path(__file__).parent
 CACHE = ROOT / "cache" / "mb"
 OUT = ROOT / "out"
 CITIES = json.loads((ROOT.parent / "data" / "cities.json").read_text())
-CITY = next((a for a in sys.argv[1:] if a in CITIES), "gurgaon")
+CITY = next((a for a in sys.argv[1:] if a in CITIES), next(iter(CITIES)))
 CFG = CITIES[CITY]
 LIST_URL = "https://www.magicbricks.com/residential-projects-in-" + CFG["magicbricks"] + "-nprid/page-{}"
 OUT = OUT / CITY

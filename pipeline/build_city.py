@@ -282,7 +282,7 @@ def shapes_for(s, area, bld_grid, sid_seed):
     return feats, shape
 
 
-def main(city="gurgaon"):
+def main(city="pune"):
     cfg = json.loads((ROOT.parent / "data" / "cities.json").read_text())[city]
     out = OUT / city
     portal = (out / "mb_projects.json").exists() and cfg.get("source", "magicbricks") == "magicbricks"
@@ -587,4 +587,4 @@ def write_csv(soc_path, unit_path, societies):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "gurgaon")
+    main(sys.argv[1] if len(sys.argv) > 1 else "pune")

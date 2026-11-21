@@ -29,7 +29,7 @@ const STATE_LABEL = { match: 'Matches your search', likely: 'Likely match', prob
 let crit = structuredClone(DEFAULT_CRITERIA);
 let baseMode = BASE_MODES.includes(params.get('map')) ? params.get('map') : 'streets';
 let roomMode = 'off', areaUnit = 'gaj', sortBy = 'best';
-let data, byId, map, feed, selected = null, states = new Map(), tourTimer = null, cityId = 'gurgaon', details = null;
+let data, byId, map, feed, selected = null, states = new Map(), tourTimer = null, cityId = 'pune', details = null;
 let myList = [], allAmenities = [];
 const highlights = { glow: true, bounds: true, labels: true, ...store.get('ff-highlights', {}) };
 
@@ -43,11 +43,11 @@ function notBuilt(name, cities) {
 }
 
 async function boot() {
-  const cities = await fetch('data/cities.json', { cache: 'no-cache' }).then((r) => r.json()).catch(() => ({ gurgaon: { name: 'Gurugram' } }));
+  const cities = await fetch('data/cities.json', { cache: 'no-cache' }).then((r) => r.json()).catch(() => ({ pune: { name: 'Pune' } }));
   const asked = (params.get('city') || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const byName = Object.keys(cities).find((id) => cities[id].name.toLowerCase().replace(/[^a-z0-9]+/g, '-') === asked);
   if (asked && !cities[asked] && !byName) { notBuilt(params.get('city'), cities); return; }
-  cityId = cities[asked] ? asked : byName || (cities.gurgaon ? 'gurgaon' : Object.keys(cities)[0]);
+  cityId = cities[asked] ? asked : byName || (cities.pune ? 'pune' : Object.keys(cities)[0]);
   const [city, shapes] = await Promise.all([
     fetch(`data/${cityId}.json`).then((r) => r.json()),
     fetch(`data/${cityId}-shapes.geojson`).then((r) => r.json()),

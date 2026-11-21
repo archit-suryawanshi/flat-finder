@@ -1,34 +1,4 @@
 {
- "gurgaon": {
-  "name": "Gurugram",
-  "magicbricks": "gurgaon",
-  "bbox": [
-   28.33,
-   76.88,
-   28.55,
-   77.16
-  ],
-  "center": [
-   77.065,
-   28.425
-  ],
-  "zoom": 12.4
- },
- "bangalore": {
-  "name": "Bengaluru",
-  "magicbricks": "bangalore",
-  "bbox": [
-   12.8,
-   77.4,
-   13.2,
-   77.8
-  ],
-  "center": [
-   77.6,
-   12.97
-  ],
-  "zoom": 11.4
- },
  "mumbai": {
   "name": "Mumbai",
   "magicbricks": "mumbai",
@@ -44,54 +14,22 @@
   ],
   "zoom": 11.4
  },
- "noida": {
-  "name": "Noida",
-  "country": "in",
-  "source": "magicbricks",
-  "magicbricks": "noida",
-  "bbox": [
-   28.4395,
-   77.3035,
-   28.6809,
-   77.5116
-  ],
-  "center": [
-   77.4076,
-   28.5602
-  ],
-  "zoom": 12.1
- },
- "jaipur": {
-  "name": "Jaipur",
-  "country": "in",
-  "source": "osm",
-  "bbox": [
-   26.7555,
-   75.659,
-   27.0755,
-   75.979
-  ],
-  "center": [
-   75.819,
-   26.9155
-  ],
-  "zoom": 11.7
- },
  "pune": {
   "name": "Pune",
   "country": "in",
-  "source": "osm",
+  "source": "magicbricks",
   "bbox": [
-   18.3614,
-   73.6945,
-   18.6814,
-   74.0145
+   18.3363,
+   73.6204,
+   18.7683,
+   74.0704
   ],
   "center": [
-   73.8545,
-   18.5214
+   73.8454,
+   18.5523
   ],
-  "zoom": 11.7
+  "zoom": 11.3,
+  "magicbricks": "pune"
  },
  "thane": {
   "name": "Thane",

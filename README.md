@@ -2,7 +2,7 @@
 
 Every housing society in a city on one night map. Set the smallest bedroom you can live with, size, BHK, amenities and budget, and watch the societies that fit light up. Every number links to where it came from.
 
-Works for any city: type its name and the map builds itself. Gurugram is the most complete (about 2,700 projects from Magicbricks, building outlines from OpenStreetMap, and societies verified from builder brochures and HRERA plans).
+Cities on the site: **Pune, Mumbai, Navi Mumbai and Thane**, from Magicbricks project pages (prices, rents, unit sizes, ratings, amenities) and OpenStreetMap (outlines, what is nearby). Any other city can be added by name (below).
 
 Site: https://flat-finder-steel-xi.vercel.app (deploys from `main` on every push, including each new city; a copy is also on https://archit-suryawanshi.github.io/flat-finder/) · forked from [kairothq/flat-finder](https://github.com/kairothq/flat-finder).
 
@@ -51,7 +51,7 @@ Bedrooms under 8 ft wide are dropped as mis-pairings. Plans that are 3D renders 
 
 ## Buy or rent
 
-Every society shows buy prices and monthly rents per BHK: medians, ranges and counts of live Magicbricks listings (22,018 homes for sale and 7,371 for rent in Gurugram). Where a society has no listings, the site shows **our estimate, marked "~"**, with the working shown:
+Every society shows buy prices and monthly rents per BHK: medians, ranges and counts of live Magicbricks listings (for example 19,955 homes for sale and 6,508 for rent in Pune). Where a society has no listings, the site shows **our estimate, marked "~"**, with the working shown:
 
 - rent from price (or price from rent) using the rental yield measured on 960 society and BHK pairs that have both (about 2.5% of the price per year, correlation between log price and log rent 0.91), using the locality's own yield where it has at least 4 pairs;
 - when there are no listings at all, unit size x the project's price per sq ft, then rent via yield.
@@ -60,8 +60,8 @@ Cards also show resident ratings by category, review snippets, the 5-year price 
 
 ## Download the data
 
-- `/data/gurgaon-societies.csv`: one row per society (location, type, listings, buy and rent medians and estimates per BHK, ratings, amenities, links).
-- `/data/gurgaon-units.csv`: one row per unit type, with bedroom sizes and sources.
+- `/data/<city>-societies.csv` (e.g. `pune-societies.csv`): one row per society (location, type, listings, buy and rent medians and estimates per BHK, ratings, amenities, links).
+- `/data/<city>-units.csv`: one row per unit type, with bedroom sizes and sources.
 - "Export these results" on the site downloads whatever your filters currently match.
 
 ## Use it inside Claude (connector)
@@ -84,9 +84,9 @@ npx github:archit-suryawanshi/flat-finder --city pune --bhk 3 --max-rent 80k --a
 ```bash
 # data
 cd pipeline
-python3 mb_crawl.py list gurgaon && python3 mb_crawl.py projects gurgaon   # polite, cached, resumable
-python3 osm_fetch.py gurgaon
-python3 build_city.py gurgaon                                               # -> web/public/data/
+python3 mb_crawl.py list pune --max 3000 && python3 mb_crawl.py projects pune   # polite, cached, resumable
+python3 osm_fetch.py pune
+python3 build_city.py pune                                                  # -> web/public/data/
 
 # site
 cd ../web && npm install && npm run dev
@@ -98,7 +98,7 @@ Cities live in `data/cities.json`; `add_city.py` writes them there.
 
 Press `/` to search for a society. The Streets button switches to a street map with road and sector names.
 
-Useful links: `?city=gurgaon`, `?map=streets` or `?map=light`, `?open=<society id>` opens one society, `?nointro` skips the globe fly-in.
+Useful links: `?city=pune`, `?map=streets` or `?map=light`, `?open=<society id>` opens one society, `?nointro` skips the globe fly-in.
 
 ## Add verified research
 
