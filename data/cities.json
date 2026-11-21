@@ -3,16 +3,18 @@
   "name": "Mumbai",
   "magicbricks": "mumbai",
   "bbox": [
-   18.89,
-   72.77,
-   19.3,
-   73.05
+   18.8813,
+   72.7464,
+   19.3313,
+   72.9483
   ],
   "center": [
-   72.88,
-   19.08
+   72.8474,
+   19.1063
   ],
-  "zoom": 11.4
+  "zoom": 11.2,
+  "country": "in",
+  "source": "magicbricks"
  },
  "pune": {
   "name": "Pune",
