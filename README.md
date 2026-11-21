@@ -4,7 +4,7 @@ Every housing society in a city on one night map. Set the smallest bedroom you c
 
 Cities on the site: **Pune, Mumbai, Navi Mumbai and Thane**, from Magicbricks project pages (prices, rents, unit sizes, ratings, amenities) and OpenStreetMap (outlines, what is nearby). Any other city can be added by name (below).
 
-Site: https://flat-finder-steel-xi.vercel.app (deploys from `main` on every push, including each new city; a copy is also on https://archit-suryawanshi.github.io/flat-finder/) · forked from [kairothq/flat-finder](https://github.com/kairothq/flat-finder).
+Site: https://flat-finder-steel-xi.vercel.app (deploys from `main` on every push, including each new city) · forked from [kairothq/flat-finder](https://github.com/kairothq/flat-finder).
 
 ## Add any city
 

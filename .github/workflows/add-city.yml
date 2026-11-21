@@ -2,7 +2,7 @@ name: Add a city
 run-name: "Add ${{ inputs.city }}"
 
 # Type a city name, press Run. The workflow finds the city, fetches its housing societies (Magicbricks where it
-# covers the city, OpenStreetMap everywhere else), builds the map data, commits it and redeploys the site.
+# covers the city, OpenStreetMap everywhere else), builds the map data and commits it; Vercel deploys the site from that commit.
 on:
   workflow_dispatch:
     inputs:
@@ -24,8 +24,6 @@ on:
 permissions:
   contents: write
   statuses: write
-  pages: write
-  id-token: write
 
 # Runs for different cities go in parallel (GitHub keeps only one queued run per group, so a single shared group
 # silently cancelled cities). Two runs for the same city still queue.
@@ -93,6 +91,3 @@ jobs:
             echo "main moved on, retrying"; sleep $((RANDOM % 20 + 5))
           done
           exit 1
-  deploy:
-    needs: build
-    uses: ./.github/workflows/deploy.yml
