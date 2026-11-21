@@ -4,11 +4,11 @@ Every housing society in a city on one night map. Set the smallest bedroom you c
 
 Works for any city: type its name and the map builds itself. Gurugram is the most complete (about 2,700 projects from Magicbricks, building outlines from OpenStreetMap, and societies verified from builder brochures and HRERA plans).
 
-Site: https://archit-suryawanshi.github.io/flat-finder/ · forked from [kairothq/flat-finder](https://github.com/kairothq/flat-finder).
+Site: https://flat-finder-steel-xi.vercel.app (deploys from `main` on every push, including each new city; a copy is also on https://archit-suryawanshi.github.io/flat-finder/) · forked from [kairothq/flat-finder](https://github.com/kairothq/flat-finder).
 
 ## Add any city
 
-**On GitHub (no setup):** open [Actions → Add a city](https://github.com/archit-suryawanshi/flat-finder/actions/workflows/add-city.yml), press **Run workflow**, type the city name and run it. It finds the city, fetches its housing societies, commits the data and redeploys the site. Then pick the city from the menu at the top left, or open `?city=<name>`. The site's city menu also has "+ Add a city", and opening `?city=<any name>` for a city not built yet explains the same step.
+**On GitHub (no setup):** open [Actions → Add a city](https://github.com/archit-suryawanshi/flat-finder/actions/workflows/add-city.yml), press **Run workflow**, type the city name and run it. It finds the city, fetches its housing societies, commits the data, and Vercel redeploys the site. Several cities can run at the same time. Then pick the city from the menu at the top left, or open `?city=<name>`. The site's city menu also has "+ Add a city", and opening `?city=<any name>` for a city not built yet explains the same step.
 
 **On your computer:**
 

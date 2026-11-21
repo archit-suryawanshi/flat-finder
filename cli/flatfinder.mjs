@@ -4,7 +4,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CRITERIA, feetLabel, formatINR, matchSociety, priceFor } from '../web/src/filters.js';
 
-const SITE = process.env.FLATFINDER_SITE || 'https://archit-suryawanshi.github.io/flat-finder';
+const SITE = process.env.FLATFINDER_SITE || 'https://flat-finder-steel-xi.vercel.app';
 
 const HELP = `flatfinder: find housing societies that fit
 
